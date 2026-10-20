@@ -223,6 +223,32 @@ static int lcm_panel_bias_disable(void)
 }
 #endif
 
+/*
+ * get_lockdown_info_for_nvt() switches the DDIC to CMD2 page 0x21. The DCS
+ * commands lcm_unprepare() relies on (display off, sleep in) are CMD1
+ * commands, so the default page must be restored afterwards. This is the same
+ * convention as lcm_panel_init() and the mainline NT36672A panel driver, which
+ * end every CMD2 excursion with 0xFF 0x10.
+ */
+static void lcm_ddic_select_cmd1(struct mtk_ddic_dsi_msg *cmd_msg)
+{
+	char select_page_cmd[] = {0xFF, 0x10};
+	int ret;
+
+	/* reuse the caller's message: no allocation, so no early-failure path */
+	memset(cmd_msg, 0, sizeof(struct mtk_ddic_dsi_msg));
+	cmd_msg->channel = 0;
+	cmd_msg->flags = 1;
+	cmd_msg->tx_cmd_num = 1;
+	cmd_msg->type[0] = 0x15;
+	cmd_msg->tx_buf[0] = select_page_cmd;
+	cmd_msg->tx_len[0] = 2;
+
+	ret = mtk_ddic_dsi_send_cmd(cmd_msg, true);
+	if (ret != 0)
+		pr_err("%s: failed to select CMD1 page, ret=%d\n", __func__, ret);
+}
+
 int get_lockdown_info_for_nvt(unsigned char* p_lockdown_info) {
 	int ret = 0;
 	int i = 0;
@@ -299,6 +325,8 @@ int get_lockdown_info_for_nvt(unsigned char* p_lockdown_info) {
 DONE1:
 	kfree(cmd_msg->rx_buf[0]);
 DONE2:
+	/* leave the DDIC on CMD1, whatever happened above */
+	lcm_ddic_select_cmd1(cmd_msg);
 	kfree(cmd_msg);
 
 	pr_info("%s end -\n", __func__);
@@ -509,6 +537,8 @@ static int lcm_unprepare(struct drm_panel *panel)
 //****panel off
 	ctx->error = 0;
 	ctx->prepared = false;
+	/* Display off/sleep in are CMD1 commands: don't rely on the page left selected */
+	lcm_dcs_write_seq_static(ctx, 0xFF, 0x10);
 	lcm_dcs_write_seq_static(ctx, 0x28);
 	lcm_dcs_write_seq_static(ctx, 0x10);
 	msleep(60);
