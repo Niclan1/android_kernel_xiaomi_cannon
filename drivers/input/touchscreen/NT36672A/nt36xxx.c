@@ -2609,7 +2609,15 @@ static int32_t nvt_ts_suspend(struct device *dev)
 		buf[1] = 0x13;
 		CTP_SPI_WRITE(ts->client, buf, 2);
 
-		enable_irq_wake(ts->client->irq);
+		if (!ts->irq_wake_enabled) {
+			int wake_ret = enable_irq_wake(ts->client->irq);
+
+			if (wake_ret)
+				NVT_ERR("enable_irq_wake failed: %d\n",
+					wake_ret);
+			else
+				ts->irq_wake_enabled = true;
+		}
 
 		NVT_LOG("Enabled touch wakeup gesture\n");
 
@@ -2668,6 +2676,16 @@ static int32_t nvt_ts_resume(struct device *dev)
 	mutex_lock(&ts->lock);
 
 	NVT_LOG("start\n");
+
+	if (ts->irq_wake_enabled) {
+		int wake_ret = disable_irq_wake(ts->client->irq);
+
+		if (wake_ret)
+			NVT_ERR("disable_irq_wake failed: %d\n",
+				wake_ret);
+		else
+			ts->irq_wake_enabled = false;
+	}
 
 	// please make sure display reset(RESX) sequence and mipi dsi cmds sent before this
 #if NVT_TOUCH_SUPPORT_HW_RST
