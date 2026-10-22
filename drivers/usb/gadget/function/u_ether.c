@@ -787,6 +787,9 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	u16			cdc_filter = 0;
 	bool			multi_pkt_xfer = false;
 	uint32_t		max_size = 0;
+	bool			is_fixed = false;
+	bool			multi_frame = false;
+	u32			fixed_in_len = 0;
 	static unsigned long okCnt, busyCnt;
 	static DEFINE_RATELIMIT_STATE(ratelimit1, 1 * HZ, 2);
 	static DEFINE_RATELIMIT_STATE(ratelimit2, 1 * HZ, 2);
@@ -801,7 +804,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	unsigned int frag_cnt = 0, frag_idx = 0, frag_data_len = 0, frag_total_len = 0;
 	char *frag_data_addr;
 
-	if (ip_debug)
+	if (ip_debug && skb)
 		if ((ip_debug_ratelimit && __ratelimit(&ratelimit3)) ||
 			!ip_debug_ratelimit) {
 			iph = skb->encapsulation ? inner_ip_hdr(skb) : ip_hdr(skb);
@@ -809,7 +812,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 				iph->tot_len, iph->id);
 		}
 
-	if (uether_tx_profile) {
+	if (uether_tx_profile && skb) {
 		#ifdef CONFIG_64BIT
 		if (!tx_profile_start) {
 			starttime = ktime_get();
@@ -841,6 +844,9 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 		cdc_filter = dev->port_usb->cdc_filter;
 		multi_pkt_xfer = dev->port_usb->multi_pkt_xfer;
 		max_size = dev->dl_max_xfer_size;
+		is_fixed = dev->port_usb->is_fixed;
+		fixed_in_len = dev->port_usb->fixed_in_len;
+		multi_frame = dev->port_usb->supports_multi_frame;
 	}
 	spin_unlock_irqrestore(&dev->lock, flags);
 
@@ -884,7 +890,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	spin_unlock_irqrestore(&dev->lock, flags);
 
 	if (!skb) {
-		if (!dev->port_usb->supports_multi_frame)
+		if (!multi_frame)
 			dev->net->stats.tx_dropped++;
 		/* no error code for dropped packets */
 		U_ETHER_DBG("%s - skb dropped\n", __func__);
@@ -1044,8 +1050,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 
 	/* NCM requires no zlp if transfer is dwNtbInMaxSize */
-	if (dev->port_usb->is_fixed &&
-	    length == dev->port_usb->fixed_in_len &&
+	if (is_fixed && length == fixed_in_len &&
 	    (length % in->maxpacket) == 0)
 		req->zero = 0;
 	else
