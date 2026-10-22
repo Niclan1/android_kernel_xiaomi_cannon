@@ -901,8 +901,7 @@ static int ncm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 
 		if (ncm->port.in_ep->enabled) {
 			DBG(cdev, "reset ncm\n");
-			ncm->timer_stopping = true;
-			ncm->netdev = NULL;
+			WRITE_ONCE(ncm->timer_stopping, true);
 			gether_disconnect(&ncm->port);
 			ncm_reset_values(ncm);
 		}
@@ -935,11 +934,18 @@ static int ncm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 				gadget_is_zlp_supported(cdev->gadget);
 			ncm->port.cdc_filter = DEFAULT_FILTER;
 			DBG(cdev, "activate ncm\n");
+
+			/*
+			 * Allow TX only once this function is being activated.
+			 * ncm->netdev is initialized in ncm_alloc() and remains
+			 * valid for the lifetime of this NCM function.
+			 */
+			WRITE_ONCE(ncm->timer_stopping, false);
 			net = gether_connect(&ncm->port);
-			if (IS_ERR(net))
+			if (IS_ERR(net)) {
+				WRITE_ONCE(ncm->timer_stopping, true);
 				return PTR_ERR(net);
-			ncm->netdev = net;
-			ncm->timer_stopping = false;
+			}
 		}
 
 		spin_lock(&ncm->lock);
@@ -1165,12 +1171,17 @@ err:
 static void ncm_tx_tasklet(unsigned long data)
 {
 	struct f_ncm	*ncm = (void *)data;
+	struct net_device *netdev;
 
-	if (ncm->timer_stopping)
+	if (READ_ONCE(ncm->timer_stopping))
 		return;
 
 	/* Only send if data is available. */
 	if (ncm->skb_tx_data) {
+		netdev = READ_ONCE(ncm->netdev);
+		if (!netdev)
+			return;
+
 		ncm->timer_force_tx = true;
 
 		/* XXX This allowance of a NULL skb argument to ndo_start_xmit
@@ -1179,7 +1190,7 @@ static void ncm_tx_tasklet(unsigned long data)
 		 * XXX and performed in some way outside of the ndo_start_xmit
 		 * XXX interface.
 		 */
-		ncm->netdev->netdev_ops->ndo_start_xmit(NULL, ncm->netdev);
+		netdev->netdev_ops->ndo_start_xmit(NULL, netdev);
 
 		ncm->timer_force_tx = false;
 	}
@@ -1399,9 +1410,8 @@ static void ncm_disable(struct usb_function *f)
 
 	DBG(cdev, "ncm deactivated\n");
 
+	WRITE_ONCE(ncm->timer_stopping, true);
 	if (ncm->port.in_ep->enabled) {
-		ncm->timer_stopping = true;
-		ncm->netdev = NULL;
 		gether_disconnect(&ncm->port);
 	}
 
@@ -1685,6 +1695,7 @@ static void ncm_unbind(struct usb_configuration *c, struct usb_function *f)
 
 	DBG(c->cdev, "ncm unbind\n");
 
+	WRITE_ONCE(ncm->timer_stopping, true);
 	hrtimer_cancel(&ncm->task_timer);
 	tasklet_kill(&ncm->tx_tasklet);
 
@@ -1728,6 +1739,17 @@ static struct usb_function *ncm_alloc(struct usb_function_instance *fi)
 	spin_lock_init(&ncm->lock);
 	ncm_reset_values(ncm);
 	ncm->port.ioport = netdev_priv(opts->net);
+	/*
+	 * Keep netdev stable for this NCM instance's lifetime; it is not a
+	 * connection-state flag. Link state is tracked by timer_stopping:
+	 * false from just before gether_connect() until teardown.
+	 *
+	 * Do not apply upstream 6334b8e unchanged: it uses netdev as a
+	 * connection-state sentinel. Preserve its stale-port teardown
+	 * protection by checking timer_stopping and endpoint state instead.
+	 */
+	ncm->netdev = opts->net;
+	WRITE_ONCE(ncm->timer_stopping, true);
 	mutex_unlock(&opts->lock);
 	ncm->port.is_fixed = true;
 	ncm->port.supports_multi_frame = true;
