@@ -594,6 +594,7 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct sk_buff	*skb;
 	struct eth_dev	*dev;
+	struct gether *link;
 	struct net_device *net;
 	struct usb_request *new_req;
 	struct usb_ep *in;
@@ -608,7 +609,19 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 	dev = ep->driver_data;
 	net = dev->net;
 
-	if (!dev->port_usb) {
+	/* gether_disconnect() clears port_usb before endpoint teardown. */
+	link = READ_ONCE(dev->port_usb);
+	if (!link) {
+		/* Plain TX owns an skb; multi-frame TX owns a separate buffer. */
+		if (req->context) {
+			skb = req->context;
+			dev_kfree_skb_any(skb);
+		} else if (dev->tx_req_bufsize) {
+			kfree(req->buf);
+			req->buf = NULL;
+		}
+		/* Match the normal completion path's in-flight accounting. */
+		atomic_dec(&dev->tx_qlen);
 		usb_ep_free_request(ep, req);
 		return;
 	}
@@ -642,10 +655,10 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 			chksum_table[chksum_rindex]) ? true : false;
 	}
 
-	if (dev->port_usb->multi_pkt_xfer && !req->context) {
+	if (link->multi_pkt_xfer && !req->context) {
 		dev->no_tx_req_used--;
 		req->length = 0;
-		in = dev->port_usb->in_ep;
+		in = link->in_ep;
 
 		new_req = container_of(dev->tx_reqs.next,
 				struct usb_request, list);
@@ -662,8 +675,8 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 			length = new_req->length;
 
 			/* NCM requires no zlp if transfer is dwNtbInMaxSize */
-			if (dev->port_usb->is_fixed &&
-					length == dev->port_usb->fixed_in_len &&
+			if (link->is_fixed &&
++					length == link->fixed_in_len &&
 					(length % in->maxpacket) == 0)
 				new_req->zero = 0;
 			else
@@ -702,7 +715,7 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 	} else {
 		skb = req->context;
 		/* Is aggregation already enabled and buffers allocated ? */
-		if (dev->port_usb->multi_pkt_xfer && dev->tx_req_bufsize) {
+		if (link->multi_pkt_xfer && dev->tx_req_bufsize) {
 #if defined(CONFIG_64BIT) && defined(CONFIG_MTK_LM_MODE)
 			req->buf = kzalloc(dev->tx_req_bufsize,
 						GFP_ATOMIC | GFP_DMA);
