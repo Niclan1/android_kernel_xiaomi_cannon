@@ -894,6 +894,7 @@ static int ncm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 {
 	struct f_ncm		*ncm = func_to_ncm(f);
 	struct usb_composite_dev *cdev = f->config->cdev;
+	bool active;
 
 	/* Control interface has only altsetting 0 */
 	if (intf == ncm->ctrl_id) {
@@ -915,7 +916,8 @@ static int ncm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 		if (alt > 1)
 			goto fail;
 
-		if (ncm->port.in_ep->enabled) {
+		active = !READ_ONCE(ncm->timer_stopping);
+		if (active || ncm->port.in_ep->enabled) {
 			DBG(cdev, "reset ncm\n");
 			WRITE_ONCE(ncm->timer_stopping, true);
 			gether_disconnect(&ncm->port);
@@ -1433,11 +1435,13 @@ static void ncm_disable(struct usb_function *f)
 {
 	struct f_ncm		*ncm = func_to_ncm(f);
 	struct usb_composite_dev *cdev = f->config->cdev;
+	bool active;
 
+	active = !READ_ONCE(ncm->timer_stopping);
 	DBG(cdev, "ncm deactivated\n");
 
 	WRITE_ONCE(ncm->timer_stopping, true);
-	if (ncm->port.in_ep->enabled) {
+	if (active || ncm->port.in_ep->enabled) {
 		gether_disconnect(&ncm->port);
 		ncm_free_tx_buffers(ncm);
 	}
