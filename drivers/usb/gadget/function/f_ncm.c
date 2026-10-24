@@ -546,6 +546,22 @@ static inline void ncm_reset_values(struct f_ncm *ncm)
 	ncm->port.fixed_in_len = NTB_DEFAULT_IN_SIZE;
 }
 
+/* Discard a partially assembled NTB once wrapping has stopped. */
+static void ncm_free_tx_buffers(struct f_ncm *ncm)
+{
+	struct sk_buff *skb;
+
+	skb = xchg(&ncm->skb_tx_data, NULL);
+	if (skb)
+		dev_kfree_skb_any(skb);
+
+	skb = xchg(&ncm->skb_tx_ndp, NULL);
+	if (skb)
+		dev_kfree_skb_any(skb);
+
+	ncm->ndp_dgram_count = 0;
+}
+
 /*
  * Context: ncm->lock held
  */
@@ -903,6 +919,7 @@ static int ncm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 			DBG(cdev, "reset ncm\n");
 			WRITE_ONCE(ncm->timer_stopping, true);
 			gether_disconnect(&ncm->port);
+			ncm_free_tx_buffers(ncm);
 			ncm_reset_values(ncm);
 		}
 
@@ -1422,6 +1439,7 @@ static void ncm_disable(struct usb_function *f)
 	WRITE_ONCE(ncm->timer_stopping, true);
 	if (ncm->port.in_ep->enabled) {
 		gether_disconnect(&ncm->port);
+		ncm_free_tx_buffers(ncm);
 	}
 
 	if (ncm->notify->enabled) {
@@ -1707,6 +1725,7 @@ static void ncm_unbind(struct usb_configuration *c, struct usb_function *f)
 	WRITE_ONCE(ncm->timer_stopping, true);
 	hrtimer_cancel(&ncm->task_timer);
 	tasklet_kill(&ncm->tx_tasklet);
+	ncm_free_tx_buffers(ncm);
 
 	ncm_string_defs[0].id = 0;
 	usb_free_all_descriptors(f);
