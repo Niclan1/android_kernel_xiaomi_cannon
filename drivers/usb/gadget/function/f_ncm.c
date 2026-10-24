@@ -1155,12 +1155,21 @@ static struct sk_buff *ncm_wrap_ntb(struct gether *port,
 err:
 	ncm->netdev->stats.tx_dropped++;
 
+	/* The old NTB may already have been packaged in this call. */
+	if (skb2)
+		dev_kfree_skb_any(skb2);
+
 	if (skb)
 		dev_kfree_skb_any(skb);
-	if (ncm->skb_tx_data)
+	if (ncm->skb_tx_data) {
 		dev_kfree_skb_any(ncm->skb_tx_data);
-	if (ncm->skb_tx_ndp)
+		WRITE_ONCE(ncm->skb_tx_data, NULL);
+	}
+	if (ncm->skb_tx_ndp) {
 		dev_kfree_skb_any(ncm->skb_tx_ndp);
+		WRITE_ONCE(ncm->skb_tx_ndp, NULL);
+	}
+	ncm->ndp_dgram_count = 0;
 
 	return NULL;
 }
