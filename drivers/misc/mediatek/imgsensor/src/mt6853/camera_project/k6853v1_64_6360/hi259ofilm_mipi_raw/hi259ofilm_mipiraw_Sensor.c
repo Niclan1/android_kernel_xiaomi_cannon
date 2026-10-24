@@ -139,7 +139,7 @@ static struct imgsensor_info_struct imgsensor_info = {
 	.ae_ispGain_delay_frame = 2,
 #else
 	.ae_shut_delay_frame = 0,
-	.ae_sensor_gain_delay_frame = 1,
+	.ae_sensor_gain_delay_frame = 0,
 	.ae_ispGain_delay_frame = 2,
 #endif
 
