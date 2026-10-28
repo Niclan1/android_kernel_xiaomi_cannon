@@ -163,6 +163,7 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_RESISTANCE_ID, /* in Ohms */
 	/* Local extensions of type int64_t */
 	POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT,
+	POWER_SUPPLY_PROP_STATE_OF_HEALTH, /* in percent */
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_PROP_MODEL_NAME,
 	POWER_SUPPLY_PROP_MANUFACTURER,
