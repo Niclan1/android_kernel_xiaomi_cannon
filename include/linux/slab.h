@@ -393,7 +393,7 @@ static __always_inline void *kmem_cache_alloc_node(struct kmem_cache *s, gfp_t f
 }
 #endif
 
-#ifdef CONFIG_TRACING
+#if defined(CONFIG_TRACING) || defined(CONFIG_KFENCE)
 extern void *kmem_cache_alloc_trace(struct kmem_cache *, gfp_t, size_t) __assume_slab_alignment __malloc;
 
 #ifdef CONFIG_NUMA

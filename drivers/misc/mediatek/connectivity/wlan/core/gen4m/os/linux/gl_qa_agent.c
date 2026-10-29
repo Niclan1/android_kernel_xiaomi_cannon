@@ -7397,12 +7397,12 @@ static int32_t HQA_MUGetLQ(struct net_device *prNetDev,
 {
 	int32_t i4Ret = 0;
 	uint32_t i;
-	uint8_t u4LqReport[NUM_OF_USER * NUM_OF_MODUL] = {0};
+	uint32_t u4LqReport[NUM_OF_USER * NUM_OF_MODUL] = {0};
 	uint8_t *prInBuf;
 
-	prInBuf = kmalloc(sizeof(uint8_t) * (HQA_BF_STR_SIZE),
-			  GFP_KERNEL);
-	ASSERT(prInBuf);
+	prInBuf = kzalloc(HQA_BF_STR_SIZE, GFP_KERNEL);
+	if (!prInBuf)
+		return -ENOMEM;
 
 	DBGLOG(RFTEST, INFO, "QA_AGENT HQA_MUGetLQ\n");
 
