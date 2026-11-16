@@ -41,6 +41,8 @@
 #include <linux/devfreq.h>
 #include <linux/nls.h>
 #include <linux/of.h>
+#include <linux/pm_runtime.h>
+#include <linux/sysfs.h>
 #include <linux/bitfield.h>
 #include "ufshcd.h"
 #include "ufs_quirks.h"
@@ -3719,12 +3721,12 @@ int ufshcd_map_desc_id_to_length(struct ufs_hba *hba,
 	case QUERY_DESC_IDN_STRING:
 		*desc_len = QUERY_DESC_MAX_SIZE;
 		break;
+	case QUERY_DESC_IDN_HEALTH:
+		*desc_len = hba->desc_size.hlth_desc;
+		break;
 	case QUERY_DESC_IDN_RFU_0:
 	case QUERY_DESC_IDN_RFU_1:
 		*desc_len = 0;
-		break;
-	case QUERY_DESC_IDN_HEALTH:
-		*desc_len = 0x25;
 		break;
 	default:
 		*desc_len = 0;
@@ -8103,6 +8105,10 @@ static void ufshcd_init_desc_sizes(struct ufs_hba *hba)
 		&hba->desc_size.geom_desc);
 	if (err)
 		hba->desc_size.geom_desc = QUERY_DESC_GEOMETRY_DEF_SIZE;
+	err = ufshcd_read_desc_length(hba, QUERY_DESC_IDN_HEALTH, 0,
+		&hba->desc_size.hlth_desc);
+	if (err)
+		hba->desc_size.hlth_desc = QUERY_DESC_HEALTH_MAX_SIZE;
 }
 
 static void ufshcd_def_desc_sizes(struct ufs_hba *hba)
@@ -8113,6 +8119,7 @@ static void ufshcd_def_desc_sizes(struct ufs_hba *hba)
 	hba->desc_size.conf_desc = QUERY_DESC_CONFIGURATION_DEF_SIZE;
 	hba->desc_size.unit_desc = QUERY_DESC_UNIT_DEF_SIZE;
 	hba->desc_size.geom_desc = QUERY_DESC_GEOMETRY_DEF_SIZE;
+	hba->desc_size.hlth_desc = QUERY_DESC_HEALTH_MAX_SIZE;
 }
 
 /**
@@ -9839,16 +9846,81 @@ static void ufshcd_add_spm_lvl_sysfs_nodes(struct ufs_hba *hba)
 		dev_err(hba->dev, "Failed to create sysfs for spm_lvl\n");
 }
 
+static ssize_t ufshcd_health_desc_value_show(struct device *dev,
+					     u8 offset, char *buf)
+{
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	u8 value = 0;
+	int ret;
+
+	if (!hba)
+		return -ENODEV;
+
+	if (hba->desc_size.hlth_desc <= offset)
+		return -EINVAL;
+
+	ret = pm_runtime_get_sync(hba->dev);
+	if (ret < 0) {
+		pm_runtime_put_noidle(hba->dev);
+		return ret;
+	}
+
+	ret = ufshcd_read_desc_param(hba, QUERY_DESC_IDN_HEALTH, 0,
+				     offset, &value, sizeof(value));
+	pm_runtime_put_sync(hba->dev);
+
+	if (ret)
+		return ret;
+
+	return scnprintf(buf, PAGE_SIZE, "0x%02X\n",
+			 (unsigned int)value);
+}
+
+#define UFSHCD_HEALTH_DESC_ATTR(_name, _offset)			\
+static ssize_t _name##_show(struct device *dev,			\
+			    struct device_attribute *attr, char *buf)	\
+{								\
+	(void)attr;						\
+	return ufshcd_health_desc_value_show(dev, _offset, buf);	\
+}								\
+static DEVICE_ATTR_RO(_name)
+
+UFSHCD_HEALTH_DESC_ATTR(eol_info, HEALTH_DESC_PARAM_EOL_INFO);
+UFSHCD_HEALTH_DESC_ATTR(life_time_estimation_a,
+			HEALTH_DESC_PARAM_LIFE_TIME_EST_A);
+UFSHCD_HEALTH_DESC_ATTR(life_time_estimation_b,
+			HEALTH_DESC_PARAM_LIFE_TIME_EST_B);
+
+#undef UFSHCD_HEALTH_DESC_ATTR
+
+static struct attribute *ufshcd_health_descriptor_attrs[] = {
+	&dev_attr_eol_info.attr,
+	&dev_attr_life_time_estimation_a.attr,
+	&dev_attr_life_time_estimation_b.attr,
+	NULL,
+};
+
+static const struct attribute_group ufshcd_health_descriptor_group = {
+	.name = "health_descriptor",
+	.attrs = ufshcd_health_descriptor_attrs,
+};
+
 static inline void ufshcd_add_sysfs_nodes(struct ufs_hba *hba)
 {
 	ufshcd_add_rpm_lvl_sysfs_nodes(hba);
 	ufshcd_add_spm_lvl_sysfs_nodes(hba);
+	if (sysfs_create_group(&hba->dev->kobj,
+			       &ufshcd_health_descriptor_group))
+		dev_warn(hba->dev,
+			 "Failed to create UFS health descriptor sysfs group\n");
 }
 
 static inline void ufshcd_remove_sysfs_nodes(struct ufs_hba *hba)
 {
 	device_remove_file(hba->dev, &hba->rpm_lvl_attr);
 	device_remove_file(hba->dev, &hba->spm_lvl_attr);
+	sysfs_remove_group(&hba->dev->kobj,
+			   &ufshcd_health_descriptor_group);
 }
 
 /**
