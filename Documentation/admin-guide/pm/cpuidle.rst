@@ -1,3 +1,6 @@
+.. SPDX-License-Identifier: GPL-2.0
+.. include:: <isonum.txt>
+
 .. |struct cpuidle_state| replace:: :c:type:`struct cpuidle_state <cpuidle_state>`
 .. |cpufreq| replace:: :doc:`CPU Performance Scaling <cpufreq>`
 
@@ -5,9 +8,10 @@
 CPU Idle Time Management
 ========================
 
-::
+:Copyright: |copy| 2018 Intel Corporation
 
- Copyright (c) 2018 Intel Corp., Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+:Author: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
+
 
 Concepts
 ========
@@ -155,17 +159,15 @@ governor uses that information depends on what algorithm is implemented by it
 and that is the primary reason for having more than one governor in the
 ``CPUIdle`` subsystem.
 
-There are three ``CPUIdle`` governors available, ``menu``, `TEO <teo-gov_>`_
-and ``ladder``.  Which of them is used by default depends on the configuration
-of the kernel and in particular on whether or not the scheduler tick can be
-`stopped by the idle loop <idle-cpus-and-tick_>`_.  It is possible to change the
-governor at run time if the ``cpuidle_sysfs_switch`` command line parameter has
-been passed to the kernel, but that is not safe in general, so it should not be
-done on production systems (that may change in the future, though).  The name of
-the ``CPUIdle`` governor currently used by the kernel can be read from the
-:file:`current_governor_ro` (or :file:`current_governor` if
-``cpuidle_sysfs_switch`` is present in the kernel command line) file under
-:file:`/sys/devices/system/cpu/cpuidle/` in ``sysfs``.
+There are four ``CPUIdle`` governors available, ``menu``, `TEO <teo-gov_>`_,
+``ladder`` and ``haltpoll``.  Which of them is used by default depends on the
+configuration of the kernel and in particular on whether or not the scheduler
+tick can be `stopped by the idle loop <idle-cpus-and-tick_>`_.  Available
+governors can be read from the :file:`available_governors`, and the governor
+can be changed at runtime.  The name of the ``CPUIdle`` governor currently
+used by the kernel can be read from the :file:`current_governor_ro` or
+:file:`current_governor` file under :file:`/sys/devices/system/cpu/cpuidle/`
+in ``sysfs``.
 
 Which ``CPUIdle`` driver is used, on the other hand, usually depends on the
 platform the kernel is running on, but there are platforms with more than one
@@ -267,61 +269,56 @@ Namely, when invoked to select an idle state for a CPU (i.e. an idle state that
 the CPU will ask the processor hardware to enter), it attempts to predict the
 idle duration and uses the predicted value for idle state selection.
 
-It first obtains the time until the closest timer event with the assumption
-that the scheduler tick will be stopped.  That time, referred to as the *sleep
-length* in what follows, is the upper bound on the time before the next CPU
-wakeup.  It is used to determine the sleep length range, which in turn is needed
-to get the sleep length correction factor.
+It first uses a simple pattern recognition algorithm to obtain a preliminary
+idle duration prediction.  Namely, it saves the last 8 observed idle duration
+values and, when predicting the idle duration next time, it computes the average
+and variance of them.  If the variance is small (smaller than 400 square
+milliseconds) or it is small relative to the average (the average is greater
+that 6 times the standard deviation), the average is regarded as the "typical
+interval" value.  Otherwise, either the longest or the shortest (depending on
+which one is farther from the average) of the saved observed idle duration
+values is discarded and the computation is repeated for the remaining ones.
 
-The ``menu`` governor maintains two arrays of sleep length correction factors.
-One of them is used when tasks previously running on the given CPU are waiting
-for some I/O operations to complete and the other one is used when that is not
-the case.  Each array contains several correction factor values that correspond
-to different sleep length ranges organized so that each range represented in the
-array is approximately 10 times wider than the previous one.
+Again, if the variance of them is small (in the above sense), the average is
+taken as the "typical interval" value and so on, until either the "typical
+interval" is determined or too many data points are disregarded.  In the latter
+case, if the size of the set of data points still under consideration is
+sufficiently large, the next idle duration is not likely to be above the largest
+idle duration value still in that set, so that value is taken as the predicted
+next idle duration.  Finally, if the set of data points still under
+consideration is too small, no prediction is made.
+
+If the preliminary prediction of the next idle duration computed this way is
+long enough, the governor obtains the time until the closest timer event with
+the assumption that the scheduler tick will be stopped.  That time, referred to
+as the *sleep length* in what follows, is the upper bound on the time before the
+next CPU wakeup.  It is used to determine the sleep length range, which in turn
+is needed to get the sleep length correction factor.
+
+The ``menu`` governor maintains an array containing several correction factor
+values that correspond to different sleep length ranges organized so that each
+range represented in the array is approximately 10 times wider than the previous
+one.
 
 The correction factor for the given sleep length range (determined before
 selecting the idle state for the CPU) is updated after the CPU has been woken
 up and the closer the sleep length is to the observed idle duration, the closer
 to 1 the correction factor becomes (it must fall between 0 and 1 inclusive).
 The sleep length is multiplied by the correction factor for the range that it
-falls into to obtain the first approximation of the predicted idle duration.
+falls into to obtain an approximation of the predicted idle duration that is
+compared to the "typical interval" determined previously and the minimum of
+the two is taken as the final idle duration prediction.
 
-Next, the governor uses a simple pattern recognition algorithm to refine its
-idle duration prediction.  Namely, it saves the last 8 observed idle duration
-values and, when predicting the idle duration next time, it computes the average
-and variance of them.  If the variance is small (smaller than 400 square
-milliseconds) or it is small relative to the average (the average is greater
-that 6 times the standard deviation), the average is regarded as the "typical
-interval" value.  Otherwise, the longest of the saved observed idle duration
-values is discarded and the computation is repeated for the remaining ones.
-Again, if the variance of them is small (in the above sense), the average is
-taken as the "typical interval" value and so on, until either the "typical
-interval" is determined or too many data points are disregarded, in which case
-the "typical interval" is assumed to equal "infinity" (the maximum unsigned
-integer value).  The "typical interval" computed this way is compared with the
-sleep length multiplied by the correction factor and the minimum of the two is
-taken as the predicted idle duration.
-
-Then, the governor computes an extra latency limit to help "interactive"
-workloads.  It uses the observation that if the exit latency of the selected
-idle state is comparable with the predicted idle duration, the total time spent
-in that state probably will be very short and the amount of energy to save by
-entering it will be relatively small, so likely it is better to avoid the
-overhead related to entering that state and exiting it.  Thus selecting a
-shallower state is likely to be a better option then.   The first approximation
-of the extra latency limit is the predicted idle duration itself which
-additionally is divided by a value depending on the number of tasks that
-previously ran on the given CPU and now they are waiting for I/O operations to
-complete.  The result of that division is compared with the latency limit coming
-from the power management quality of service, or `PM QoS <cpu-pm-qos_>`_,
-framework and the minimum of the two is taken as the limit for the idle states'
-exit latency.
+If the "typical interval" value is small, which means that the CPU is likely
+to be woken up soon enough, the sleep length computation is skipped as it may
+be costly and the idle duration is simply predicted to equal the "typical
+interval" value.
 
 Now, the governor is ready to walk the list of idle states and choose one of
 them.  For this purpose, it compares the target residency of each state with
-the predicted idle duration and the exit latency of it with the computed latency
-limit.  It selects the state with the target residency closest to the predicted
+the predicted idle duration and the exit latency of it with the with the latency
+limit coming from the power management quality of service, or `PM QoS <cpu-pm-qos_>`_,
+framework.  It selects the state with the target residency closest to the predicted
 idle duration, but still below it, and exit latency that does not exceed the
 limit.
 
@@ -345,81 +342,8 @@ for tickless systems.  It follows the same basic strategy as the ``menu`` `one
 <menu-gov_>`_: it always tries to find the deepest idle state suitable for the
 given conditions.  However, it applies a different approach to that problem.
 
-First, it does not use sleep length correction factors, but instead it attempts
-to correlate the observed idle duration values with the available idle states
-and use that information to pick up the idle state that is most likely to
-"match" the upcoming CPU idle interval.   Second, it does not take the tasks
-that were running on the given CPU in the past and are waiting on some I/O
-operations to complete now at all (there is no guarantee that they will run on
-the same CPU when they become runnable again) and the pattern detection code in
-it avoids taking timer wakeups into account.  It also only uses idle duration
-values less than the current time till the closest timer (with the scheduler
-tick excluded) for that purpose.
-
-Like in the ``menu`` governor `case <menu-gov_>`_, the first step is to obtain
-the *sleep length*, which is the time until the closest timer event with the
-assumption that the scheduler tick will be stopped (that also is the upper bound
-on the time until the next CPU wakeup).  That value is then used to preselect an
-idle state on the basis of three metrics maintained for each idle state provided
-by the ``CPUIdle`` driver: ``hits``, ``misses`` and ``early_hits``.
-
-The ``hits`` and ``misses`` metrics measure the likelihood that a given idle
-state will "match" the observed (post-wakeup) idle duration if it "matches" the
-sleep length.  They both are subject to decay (after a CPU wakeup) every time
-the target residency of the idle state corresponding to them is less than or
-equal to the sleep length and the target residency of the next idle state is
-greater than the sleep length (that is, when the idle state corresponding to
-them "matches" the sleep length).  The ``hits`` metric is increased if the
-former condition is satisfied and the target residency of the given idle state
-is less than or equal to the observed idle duration and the target residency of
-the next idle state is greater than the observed idle duration at the same time
-(that is, it is increased when the given idle state "matches" both the sleep
-length and the observed idle duration).  In turn, the ``misses`` metric is
-increased when the given idle state "matches" the sleep length only and the
-observed idle duration is too short for its target residency.
-
-The ``early_hits`` metric measures the likelihood that a given idle state will
-"match" the observed (post-wakeup) idle duration if it does not "match" the
-sleep length.  It is subject to decay on every CPU wakeup and it is increased
-when the idle state corresponding to it "matches" the observed (post-wakeup)
-idle duration and the target residency of the next idle state is less than or
-equal to the sleep length (i.e. the idle state "matching" the sleep length is
-deeper than the given one).
-
-The governor walks the list of idle states provided by the ``CPUIdle`` driver
-and finds the last (deepest) one with the target residency less than or equal
-to the sleep length.  Then, the ``hits`` and ``misses`` metrics of that idle
-state are compared with each other and it is preselected if the ``hits`` one is
-greater (which means that that idle state is likely to "match" the observed idle
-duration after CPU wakeup).  If the ``misses`` one is greater, the governor
-preselects the shallower idle state with the maximum ``early_hits`` metric
-(or if there are multiple shallower idle states with equal ``early_hits``
-metric which also is the maximum, the shallowest of them will be preselected).
-[If there is a wakeup latency constraint coming from the `PM QoS framework
-<cpu-pm-qos_>`_ which is hit before reaching the deepest idle state with the
-target residency within the sleep length, the deepest idle state with the exit
-latency within the constraint is preselected without consulting the ``hits``,
-``misses`` and ``early_hits`` metrics.]
-
-Next, the governor takes several idle duration values observed most recently
-into consideration and if at least a half of them are greater than or equal to
-the target residency of the preselected idle state, that idle state becomes the
-final candidate to ask for.  Otherwise, the average of the most recent idle
-duration values below the target residency of the preselected idle state is
-computed and the governor walks the idle states shallower than the preselected
-one and finds the deepest of them with the target residency within that average.
-That idle state is then taken as the final candidate to ask for.
-
-Still, at this point the governor may need to refine the idle state selection if
-it has not decided to `stop the scheduler tick <idle-cpus-and-tick_>`_.  That
-generally happens if the target residency of the idle state selected so far is
-less than the tick period and the tick has not been stopped already (in a
-previous iteration of the idle loop).  Then, like in the ``menu`` governor
-`case <menu-gov_>`_, the sleep length used in the previous computations may not
-reflect the real time until the closest timer event and if it really is greater
-than that time, a shallower state with a suitable target residency may need to
-be selected.
-
+.. kernel-doc:: drivers/cpuidle/governors/teo.c
+   :doc: teo-description
 
 .. _idle-states-representation:
 
@@ -476,7 +400,7 @@ order to ask the hardware to enter that state.  Also, for each
 statistics of the given idle state.  That information is exposed by the kernel
 via ``sysfs``.
 
-For each CPU in the system, there is a :file:`/sys/devices/system/cpu<N>/cpuidle/`
+For each CPU in the system, there is a :file:`/sys/devices/system/cpu/cpu<N>/cpuidle/`
 directory in ``sysfs``, where the number ``<N>`` is assigned to the given
 CPU at the initialization time.  That directory contains a set of subdirectories
 called :file:`state0`, :file:`state1` and so on, up to the number of idle state
@@ -492,7 +416,7 @@ object corresponding to it, as follows:
 	residency.
 
 ``below``
-	Total number of times this idle state had been asked for, but cerainly
+	Total number of times this idle state had been asked for, but certainly
 	a deeper idle state would have been a better match for the observed idle
 	duration.
 
@@ -501,6 +425,9 @@ object corresponding to it, as follows:
 
 ``disable``
 	Whether or not this idle state is disabled.
+
+``default_status``
+	The default status of this state, "enabled" or "disabled".
 
 ``latency``
 	Exit latency of the idle state in microseconds.
@@ -522,6 +449,10 @@ object corresponding to it, as follows:
 ``usage``
 	Total number of times the hardware has been asked by the given CPU to
 	enter this idle state.
+
+``rejected``
+	Total number of times a request to enter this idle state on the given
+	CPU was rejected.
 
 The :file:`desc` and :file:`name` files both contain strings.  The difference
 between them is that the name is expected to be more concise, while the
@@ -567,6 +498,11 @@ particular case.  For these reasons, the only reliable way to find out how
 much time has been spent by the hardware in different idle states supported by
 it is to use idle state residency counters in the hardware, if available.
 
+Generally, an interrupt received when trying to enter an idle state causes the
+idle state entry request to be rejected, in which case the ``CPUIdle`` driver
+may return an error code to indicate that this was the case. The :file:`usage`
+and :file:`rejected` files report the number of times the given idle state
+was entered successfully or rejected, respectively.
 
 .. _cpu-pm-qos:
 
@@ -576,20 +512,17 @@ Power Management Quality of Service for CPUs
 The power management quality of service (PM QoS) framework in the Linux kernel
 allows kernel code and user space processes to set constraints on various
 energy-efficiency features of the kernel to prevent performance from dropping
-below a required level.  The PM QoS constraints can be set globally, in
-predefined categories referred to as PM QoS classes, or against individual
-devices.
+below a required level.
 
 CPU idle time management can be affected by PM QoS in two ways, through the
-global constraint in the ``PM_QOS_CPU_DMA_LATENCY`` class and through the
-resume latency constraints for individual CPUs.  Kernel code (e.g. device
-drivers) can set both of them with the help of special internal interfaces
-provided by the PM QoS framework.  User space can modify the former by opening
-the :file:`cpu_dma_latency` special device file under :file:`/dev/` and writing
-a binary value (interpreted as a signed 32-bit integer) to it.  In turn, the
-resume latency constraint for a CPU can be modified by user space by writing a
-string (representing a signed 32-bit integer) to the
-:file:`power/pm_qos_resume_latency_us` file under
+global CPU latency limit and through the resume latency constraints for
+individual CPUs.  Kernel code (e.g. device drivers) can set both of them with
+the help of special internal interfaces provided by the PM QoS framework.  User
+space can modify the former by opening the :file:`cpu_dma_latency` special
+device file under :file:`/dev/` and writing a binary value (interpreted as a
+signed 32-bit integer) to it.  In turn, the resume latency constraint for a CPU
+can be modified from user space by writing a string (representing a signed
+32-bit integer) to the :file:`power/pm_qos_resume_latency_us` file under
 :file:`/sys/devices/system/cpu/cpu<N>/` in ``sysfs``, where the CPU number
 ``<N>`` is allocated at the system initialization time.  Negative values
 will be rejected in both cases and, also in both cases, the written integer
@@ -598,52 +531,54 @@ number will be interpreted as a requested PM QoS constraint in microseconds.
 The requested value is not automatically applied as a new constraint, however,
 as it may be less restrictive (greater in this particular case) than another
 constraint previously requested by someone else.  For this reason, the PM QoS
-framework maintains a list of requests that have been made so far in each
-global class and for each device, aggregates them and applies the effective
-(minimum in this particular case) value as the new constraint.
+framework maintains a list of requests that have been made so far for the
+global CPU latency limit and for each individual CPU, aggregates them and
+applies the effective (minimum in this particular case) value as the new
+constraint.
 
 In fact, opening the :file:`cpu_dma_latency` special device file causes a new
-PM QoS request to be created and added to the priority list of requests in the
-``PM_QOS_CPU_DMA_LATENCY`` class and the file descriptor coming from the
-"open" operation represents that request.  If that file descriptor is then
-used for writing, the number written to it will be associated with the PM QoS
-request represented by it as a new requested constraint value.  Next, the
-priority list mechanism will be used to determine the new effective value of
-the entire list of requests and that effective value will be set as a new
-constraint.  Thus setting a new requested constraint value will only change the
-real constraint if the effective "list" value is affected by it.  In particular,
-for the ``PM_QOS_CPU_DMA_LATENCY`` class it only affects the real constraint if
-it is the minimum of the requested constraints in the list.  The process holding
-a file descriptor obtained by opening the :file:`cpu_dma_latency` special device
-file controls the PM QoS request associated with that file descriptor, but it
-controls this particular PM QoS request only.
+PM QoS request to be created and added to a global priority list of CPU latency
+limit requests and the file descriptor coming from the "open" operation
+represents that request.  If that file descriptor is then used for writing, the
+number written to it will be associated with the PM QoS request represented by
+it as a new requested limit value.  Next, the priority list mechanism will be
+used to determine the new effective value of the entire list of requests and
+that effective value will be set as a new CPU latency limit.  Thus requesting a
+new limit value will only change the real limit if the effective "list" value is
+affected by it, which is the case if it is the minimum of the requested values
+in the list.
+
+The process holding a file descriptor obtained by opening the
+:file:`cpu_dma_latency` special device file controls the PM QoS request
+associated with that file descriptor, but it controls this particular PM QoS
+request only.
 
 Closing the :file:`cpu_dma_latency` special device file or, more precisely, the
 file descriptor obtained while opening it, causes the PM QoS request associated
-with that file descriptor to be removed from the ``PM_QOS_CPU_DMA_LATENCY``
-class priority list and destroyed.  If that happens, the priority list mechanism
-will be used, again, to determine the new effective value for the whole list
-and that value will become the new real constraint.
+with that file descriptor to be removed from the global priority list of CPU
+latency limit requests and destroyed.  If that happens, the priority list
+mechanism will be used again, to determine the new effective value for the whole
+list and that value will become the new limit.
 
-In turn, for each CPU there is only one resume latency PM QoS request
-associated with the :file:`power/pm_qos_resume_latency_us` file under
+In turn, for each CPU there is one resume latency PM QoS request associated with
+the :file:`power/pm_qos_resume_latency_us` file under
 :file:`/sys/devices/system/cpu/cpu<N>/` in ``sysfs`` and writing to it causes
 this single PM QoS request to be updated regardless of which user space
 process does that.  In other words, this PM QoS request is shared by the entire
 user space, so access to the file associated with it needs to be arbitrated
 to avoid confusion.  [Arguably, the only legitimate use of this mechanism in
 practice is to pin a process to the CPU in question and let it use the
-``sysfs`` interface to control the resume latency constraint for it.]  It
-still only is a request, however.  It is a member of a priority list used to
+``sysfs`` interface to control the resume latency constraint for it.]  It is
+still only a request, however.  It is an entry in a priority list used to
 determine the effective value to be set as the resume latency constraint for the
 CPU in question every time the list of requests is updated this way or another
 (there may be other requests coming from kernel code in that list).
 
 CPU idle time governors are expected to regard the minimum of the global
-effective ``PM_QOS_CPU_DMA_LATENCY`` class constraint and the effective
-resume latency constraint for the given CPU as the upper limit for the exit
-latency of the idle states they can select for that CPU.  They should never
-select any idle states with exit latency beyond that limit.
+(effective) CPU latency limit and the effective resume latency constraint for
+the given CPU as the upper limit for the exit latency of the idle states that
+they are allowed to select for that CPU.  They should never select any idle
+states with exit latency beyond that limit.
 
 
 Idle States Control Via Kernel Command Line
@@ -672,8 +607,8 @@ the ``menu`` governor to be used on the systems that use the ``ladder`` governor
 by default this way, for example.
 
 The other kernel command line parameters controlling CPU idle time management
-described below are only relevant for the *x86* architecture and some of
-them affect Intel processors only.
+described below are only relevant for the *x86* architecture and references
+to ``intel_idle`` affect Intel processors only.
 
 The *x86* architecture support code recognizes three kernel command line
 options related to CPU idle time management: ``idle=poll``, ``idle=halt``,
@@ -686,7 +621,7 @@ which of the two parameters is added to the kernel command line.  In the
 instruction of the CPUs (which, as a rule, suspends the execution of the program
 and causes the hardware to attempt to enter the shallowest available idle state)
 for this purpose, and if ``idle=poll`` is used, idle CPUs will execute a
-more or less ``lightweight'' sequence of instructions in a tight loop.  [Note
+more or less "lightweight" sequence of instructions in a tight loop.  [Note
 that using ``idle=poll`` is somewhat drastic in many cases, as preventing idle
 CPUs from saving almost any energy at all may not be the only effect of it.
 For example, on Intel hardware it effectively prevents CPUs from using
@@ -695,10 +630,13 @@ idle, so it very well may hurt single-thread computations performance as well as
 energy-efficiency.  Thus using it for performance reasons may not be a good idea
 at all.]
 
-The ``idle=nomwait`` option disables the ``intel_idle`` driver and causes
-``acpi_idle`` to be used (as long as all of the information needed by it is
-there in the system's ACPI tables), but it is not allowed to use the
-``MWAIT`` instruction of the CPUs to ask the hardware to enter idle states.
+The ``idle=nomwait`` option prevents the use of ``MWAIT`` instruction of
+the CPU to enter idle states. When this option is used, the ``acpi_idle``
+driver will use the ``HLT`` instruction instead of ``MWAIT``. On systems
+running Intel processors, this option disables the ``intel_idle`` driver
+and forces the use of the ``acpi_idle`` driver instead. Note that in either
+case, ``acpi_idle`` driver will function only if all the information needed
+by it is in the system's ACPI tables.
 
 In addition to the architecture-level kernel command line options affecting CPU
 idle time management, there are parameters affecting individual ``CPUIdle``

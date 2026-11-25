@@ -26,9 +26,8 @@
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
-#include <linux/io.h>
 #include <linux/init.h>
-#include <linux/pci.h>
+#include <linux/module.h>
 #include <linux/dma-mapping.h>
 #include <linux/gameport.h>
 #include <linux/moduleparam.h>
@@ -146,7 +145,7 @@ static int aw87359_i2c_write_bits(struct aw87359 *aw87359,
 /************************************************************************
 * aw87359 hardware control
 ************************************************************************/
-unsigned int aw87359_hw_on(struct aw87359 *aw87359)
+static unsigned int aw87359_hw_on(struct aw87359 *aw87359)
 {
 	pr_info("%s enter\n", __func__);
 
@@ -155,7 +154,7 @@ unsigned int aw87359_hw_on(struct aw87359 *aw87359)
 	return 0;
 }
 
-unsigned int aw87359_hw_off(struct aw87359 *aw87359)
+static unsigned int aw87359_hw_off(struct aw87359 *aw87359)
 {
 	pr_info("%s enter\n", __func__);
 
@@ -176,7 +175,7 @@ static void aw87359_AGC_config(void)
 				       AW87359_BIT_AGC3PO_AGC3_DISABLE);
 		aw87359_i2c_write_bits(aw87359, REG_AGC2PO,
 				       AW87359_BIT_AGC2PO_AGC2_PO_MASK,
-				       AW87359_BIT_AGC2PO_AGC2_DISABLE); 
+				       AW87359_BIT_AGC2PO_AGC2_DISABLE);
 		aw87359_i2c_write_bits(aw87359, REG_AGC1PA,
 				       AW87359_BIT_AGC1PA_PD_AGC1_MASK,
 				       AW87359_BIT_AGC1PA_AGC1_DISABLE);
@@ -222,6 +221,7 @@ unsigned char aw87359_audio_dspk(void)
 	aw87359_AGC_config();
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw87359_audio_dspk);
 
 unsigned char aw87359_audio_drcv(void)
 {
@@ -288,7 +288,7 @@ unsigned char aw87359_audio_abspk(void)
 
 		}
 	}
-	
+
 	aw87359_AGC_config();
 	return 0;
 }
@@ -324,10 +324,11 @@ unsigned char aw87359_audio_abrcv(void)
 
 		}
 	}
-	
+
 	aw87359_AGC_config();
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw87359_audio_abrcv);
 
 unsigned char aw87359_audio_off(void)
 {
@@ -340,14 +341,15 @@ unsigned char aw87359_audio_off(void)
 	aw87359_hw_off(aw87359);
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw87359_audio_off);
 
-unsigned char aw87359_audio_AGC_bypass(void)
+static unsigned char aw87359_audio_AGC_bypass(void)
 {
 	if (aw87359 == NULL)
 		return 2;
-	
+
 	aw87359->AGC_bypass_flag = true;
-	
+
 	aw87359_AGC_config();
 	return 0;
 }
@@ -404,7 +406,7 @@ static int aw87359_abrcv_update(struct aw87359 *aw87359)
 {
 	pr_info("%s enter\n", __func__);
 	return request_firmware_nowait(THIS_MODULE,
-					FW_ACTION_HOTPLUG,
+					true,
 					aw87359_abrcv_name,
 					&aw87359->i2c_client->dev,
 					GFP_KERNEL,
@@ -461,7 +463,7 @@ static int aw87359_abspk_update(struct aw87359 *aw87359)
 {
 	pr_info("%s enter\n", __func__);
 	return request_firmware_nowait(THIS_MODULE,
-					FW_ACTION_HOTPLUG,
+					true,
 					aw87359_abspk_name,
 					&aw87359->i2c_client->dev,
 					GFP_KERNEL,
@@ -519,7 +521,7 @@ static int aw87359_drcv_update(struct aw87359 *aw87359)
 {
 	pr_info("%s enter\n", __func__);
 	return request_firmware_nowait(THIS_MODULE,
-					FW_ACTION_HOTPLUG,
+					true,
 					aw87359_drcv_name,
 					&aw87359->i2c_client->dev,
 					GFP_KERNEL,
@@ -580,7 +582,7 @@ static int aw87359_dspk_update(struct aw87359 *aw87359)
 	pr_info("%s enter\n", __func__);
 
 	return request_firmware_nowait(THIS_MODULE,
-					FW_ACTION_HOTPLUG,
+					true,
 					aw87359_dspk_name,
 					&aw87359->i2c_client->dev,
 					GFP_KERNEL,
@@ -806,7 +808,7 @@ static struct attribute_group aw87359_attribute_group = {
 /*****************************************************
 * check chip id
 *****************************************************/
-int aw87359_read_chipid(struct aw87359 *aw87359)
+static int aw87359_read_chipid(struct aw87359 *aw87359)
 {
 	unsigned int cnt = 0;
 	int ret = -1;
@@ -832,8 +834,7 @@ int aw87359_read_chipid(struct aw87359 *aw87359)
 /****************************************************************************
 * aw87359 i2c driver
 *****************************************************************************/
-static int
-aw87359_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int aw87359_i2c_probe(struct i2c_client *client)
 {
 	int ret = -1;
 
@@ -874,7 +875,7 @@ aw87359_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	aw87359->AGC_bypass_flag = false;
 	pr_info("%s aw87359->AGC_bypass_flag = %d\n", __func__,
 		 aw87359->AGC_bypass_flag);
-	
+
 	/* aw87359 cfg update */
 	dspk_load_cont = 0;
 	drcv_load_cont = 0;
@@ -898,9 +899,9 @@ exit_check_functionality_failed:
 	return ret;
 }
 
-static int aw87359_i2c_remove(struct i2c_client *client)
+static void aw87359_i2c_remove(struct i2c_client *client)
 {
-	return 0;
+	sysfs_remove_group(&client->dev.kobj, &aw87359_attribute_group);
 }
 
 static const struct i2c_device_id aw87359_i2c_id[] = {

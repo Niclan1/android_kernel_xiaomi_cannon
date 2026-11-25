@@ -282,10 +282,10 @@ static int mtk_dai_pcm_hw_params(struct snd_pcm_substream *substream,
 		 substream->stream,
 		 rate,
 		 rate_reg,
-		 dai->playback_widget->active,
-		 dai->capture_widget->active);
+		 snd_soc_dai_get_widget_playback(dai)->active,
+		 snd_soc_dai_get_widget_capture(dai)->active);
 
-	if (dai->playback_widget->active || dai->capture_widget->active)
+	if (snd_soc_dai_get_widget_playback(dai)->active || snd_soc_dai_get_widget_capture(dai)->active)
 		return 0;
 
 	switch (dai->id) {
@@ -359,8 +359,8 @@ static struct snd_soc_dai_driver mtk_dai_pcm_driver[] = {
 			.formats = MTK_PCM_FORMATS,
 		},
 		.ops = &mtk_dai_pcm_ops,
-		.symmetric_rates = 1,
-		.symmetric_samplebits = 1,
+		.symmetric_rate = 1,
+		.symmetric_sample_bits = 1,
 	},
 	{
 		.name = "PCM 2",
@@ -380,8 +380,8 @@ static struct snd_soc_dai_driver mtk_dai_pcm_driver[] = {
 			.formats = MTK_PCM_FORMATS,
 		},
 		.ops = &mtk_dai_pcm_ops,
-		.symmetric_rates = 1,
-		.symmetric_samplebits = 1,
+		.symmetric_rate = 1,
+		.symmetric_sample_bits = 1,
 	},
 };
 

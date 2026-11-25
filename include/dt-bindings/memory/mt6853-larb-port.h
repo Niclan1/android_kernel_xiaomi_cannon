@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2015-2016 MediaTek Inc.
  * This program is free software; you can redistribute it and/or modify
@@ -9,25 +10,22 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#ifndef _DTS_IOMMU_PORT_MT6853_H_
-#define _DTS_IOMMU_PORT_MT6853_H_
-
-#if defined CONFIG_MACH_MT6877
-#include "mt6877-larb-port.h"
-#else
+#ifndef _DT_BINDINGS_MEMORY_MT6853_LARB_PORT_H
+#define _DT_BINDINGS_MEMORY_MT6853_LARB_PORT_H
 
 #define MTK_M4U_ID(larb, port)			(((larb) << 5) | (port))
+#define MTK_M4U_DOM_ID(dom, larb, port)		((((dom) & 0xf) << 16) | \
+							 MTK_M4U_ID(larb, port))
 
 /* Local arbiter ID */
 #define MTK_IOMMU_TO_LARB(id)			(((id) >> 5) & 0x1f)
 /* PortID within the local arbiter */
 #define MTK_IOMMU_TO_PORT(id)			((id) & 0x1f)
 
+/* Legacy pseudo-LARB IDs; not physical SMI LARBs. */
 #define APU_PSEUDO_LARBID			(21)
 #define CCU0_PSEUDO_LARBID			(22)
 #define CCU1_PSEUDO_LARBID			(23)
-/* 3, 5, 6, 8 is not applied for IOMMU*/
-#define MTK_IOMMU_LARB_NR			(24)
 
 /*********************************************************/
 /* larb0 -- 4 */
@@ -229,76 +227,20 @@
 #define M4U_PORT_L20_IPE_FDVT_WRB		MTK_M4U_ID(20, 3)
 #define M4U_PORT_L20_IPE_RSC_RDMA0		MTK_M4U_ID(20, 4)
 #define M4U_PORT_L20_IPE_RSC_WDMA		MTK_M4U_ID(20, 5)
-/* fake larb -- 5 */
+
+/* Legacy Cannon pseudo-ports; ACK MM IOMMU does not support these fwspecs. */
+#define M4U_PORT_L22_CCU0			MTK_M4U_ID(CCU0_PSEUDO_LARBID, 0)
+#define M4U_PORT_L23_CCU1			MTK_M4U_ID(CCU1_PSEUDO_LARBID, 0)
+
+/* Legacy APU pseudo-ports in existing Cannong DTBs. */
 #define M4U_PORT_L21_APU_FAKE_CODE		MTK_M4U_ID(APU_PSEUDO_LARBID, 0)
 #define M4U_PORT_L21_APU_FAKE_DATA		MTK_M4U_ID(APU_PSEUDO_LARBID, 1)
 #define M4U_PORT_L21_APU_FAKE_VLM		MTK_M4U_ID(APU_PSEUDO_LARBID, 2)
-#define M4U_PORT_L22_CCU0		MTK_M4U_ID(CCU0_PSEUDO_LARBID, 0)
-#define M4U_PORT_L23_CCU1		MTK_M4U_ID(CCU1_PSEUDO_LARBID, 0)
 
-#define M4U_PORT_GPU				MTK_M4U_ID(31, 31)
-#define M4U_PORT_UNKNOWN			(M4U_PORT_L23_CCU1 + 1)
-#define M4U_PORT_NR				(181)
-
-/*********************************************************/
-/* for pusedo fake device */
-#define MISC_PSEUDO_LARBID			MTK_IOMMU_LARB_NR
-#define APU_PSEUDO_LARBID_CODE			(MTK_IOMMU_LARB_NR + 1)
-#define APU_PSEUDO_LARBID_DATA			(MTK_IOMMU_LARB_NR + 2)
-#define APU_PSEUDO_LARBID_VLM			(MTK_IOMMU_LARB_NR + 3)
-
-#define M4U_PORT_APU				M4U_PORT_L21_APU_FAKE_DATA
-
-/* for debug debug */
-#define M4U_PORT_APU_CODE			M4U_PORT_L21_APU_FAKE_CODE
+/* Domain IDs used by the newer MT6853 APU IOMMU binding. */
+#define M4U_PORT_L22_APU_DATA			MTK_M4U_DOM_ID(5, 22, 0)
+#define M4U_PORT_L22_APU_VLM			MTK_M4U_DOM_ID(6, 22, 0)
+#define M4U_PORT_L22_APU_VPU			MTK_M4U_DOM_ID(7, 22, 0)
 #define M4U_PORT_CCU				M4U_PORT_L23_CCU1
-#define M4U_PORT_OVL_DEBUG			M4U_PORT_L0_DISP_FAKE0/*no use*/
-#define M4U_PORT_MDP_DEBUG			M4U_PORT_L0_DISP_POSTMASK0
-#define M4U_PORT_BOUNDARY0_DEBUG		M4U_PORT_L0_DISP_FAKE0
-#define M4U_PORT_BOUNDARY1_DEBUG		M4U_PORT_L4_VDEC_MC_EXT
-#define M4U_PORT_BOUNDARY2_DEBUG		M4U_PORT_L11_IMG_IMGI_D1
-#define M4U_PORT_BOUNDARY3_DEBUG		M4U_PORT_L21_APU_FAKE_DATA
-
-#if defined(CONFIG_MTK_IOMMU_PGTABLE_EXT) \
-	&& (CONFIG_MTK_IOMMU_PGTABLE_EXT == 34)
-#define MTK_IOVA_ADDR_BITS			34
-#define MTK_PHYS_ADDR_BITS			35
-#else
-#define MTK_IOVA_ADDR_BITS			32
-#define MTK_PHYS_ADDR_BITS			34
-#endif
-
-/* the total number of iommu(include mm and vpu) */
-#if defined(CONFIG_FPGA_EARLY_PORTING) || !defined(CONFIG_MTK_APUSYS_SUPPORT)
-#define MTK_IOMMU_M4U_COUNT			1
-#else
-#define MTK_IOMMU_M4U_COUNT			2
-#endif
-
-/* iommu hw register define */
-#define MTK_IOMMU_DEBUG_REG_NR			(6)
-#define MTK_IOMMU_WAY_NR			(4)
-#define MTK_IOMMU_RS_COUNT			(16)
-#define MTK_IOMMU_MMU_COUNT			(2)
-#define MTK_IOMMU_TAG_COUNT			(64)
-#define MTK_IOMMU_BANK_COUNT			(5)
-#define MTK_IOMMU_MAU_COUNT			(1)
-#define MTK_MMU_NUM_OF_IOMMU(m4u_id)		MTK_IOMMU_MMU_COUNT
-#define MTK_MAU_NUM_OF_MMU(mmu_id)		MTK_IOMMU_MAU_COUNT
-#define MMU_PAGE_PER_LINE			(8)
-#define MMU_ENTRY_PER_VICTIM		(16)
-
-/* no use delete it for mouton? */
-#define MTK_IOMMU_LARB_CODEC_MIN		(4)
-#define MTK_IOMMU_LARB_CODEC_MAX		(11)
-
-#define MTK_IOMMU_IOVA_BOUNDARY_COUNT \
-(1 << (CONFIG_MTK_IOMMU_PGTABLE_EXT - 32))
-
-/* the number of apu_iommu */
-#define APU_IOMMU_INDEX				(1)
-
-#define MTK_IOMMU_PORT_TRANSFER_DISABLE
-#endif
 
 #endif

@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTK_CCCI
+	bool "MediaTek MT6853 CCCI modem (MD1) driver"
+	depends on ARM64 && OF && OF_RESERVED_MEM && NET
+	depends on PM && PM_GENERIC_DOMAINS && MFD_SYSCON && POWER_SUPPLY
+	depends on ARCH_MEDIATEK || COMPILE_TEST
+	default n
+	help
+	  Port of the MediaTek eccci stack (CCIF control channel, DPMAIF
+	  data path, ccmni network devices, /dev/ccci_* character devices,
+	  /sys/kernel/ccci and the MD1 boot state machine) used by the
+	  vendor ccci_mdinit, ccci_fsd and rild userspace.
+
+	  Nothing is registered unless the kernel is booted with
+
+	    mtk_ccci.hw=1
+
+	  Adding mtk_ccci.power=0 registers the devices and device nodes
+	  but refuses to power or start the modem. The device tree needs
+	  the nodes from arch/arm64/boot/dts/mediatek/mt6853-modem.dtsi.
+	  Must be built in.
+
+	  If unsure, say N.

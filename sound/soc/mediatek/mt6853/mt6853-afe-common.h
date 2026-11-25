@@ -125,18 +125,6 @@ enum {
 	MT6853_IRQ_NUM,
 };
 
-enum {
-	MTKAIF_PROTOCOL_1 = 0,
-	MTKAIF_PROTOCOL_2,
-	MTKAIF_PROTOCOL_2_CLK_P2,
-};
-
-enum {
-	MTK_AFE_ADDA_DL_GAIN_MUTE = 0,
-	MTK_AFE_ADDA_DL_GAIN_NORMAL = 0xf74f,
-	/* SA suggest apply -0.3db to audio/speech path */
-};
-
 /* MCLK */
 enum {
 	MT6853_I2S0_MCK = 0,
@@ -149,17 +137,6 @@ enum {
 	MT6853_MCK_NUM,
 };
 
-/* SMC CALL Operations */
-enum mtk_audio_smc_call_op {
-	MTK_AUDIO_SMC_OP_INIT = 0,
-	MTK_AUDIO_SMC_OP_DRAM_REQUEST,
-	MTK_AUDIO_SMC_OP_DRAM_RELEASE,
-	MTK_AUDIO_SMC_OP_FM_REQUEST,
-	MTK_AUDIO_SMC_OP_FM_RELEASE,
-	MTK_AUDIO_SMC_OP_ADSP_REQUEST,
-	MTK_AUDIO_SMC_OP_ADSP_RELEASE,
-	MTK_AUDIO_SMC_OP_NUM
-};
 
 struct snd_pcm_substream;
 struct mtk_base_irq_data;
@@ -240,7 +217,7 @@ int mt6853_dai_tdm_register(struct mtk_base_afe *afe);
 
 int mt6853_dai_hostless_register(struct mtk_base_afe *afe);
 
-int mt6853_add_misc_control(struct snd_soc_platform *platform);
+int mt6853_add_misc_control(struct snd_soc_component *component);
 
 int mt6853_set_local_afe(struct mtk_base_afe *afe);
 

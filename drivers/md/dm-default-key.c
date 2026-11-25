@@ -9,10 +9,6 @@
 
 #define DM_MSG_PREFIX		"default-key"
 
-#define DM_DEFAULT_KEY_MAX_WRAPPED_KEY_SIZE 128
-
-#define SECTOR_SIZE			(1 << SECTOR_SHIFT)
-
 static const struct dm_default_key_cipher {
 	const char *name;
 	enum blk_crypto_mode_num mode_num;
@@ -50,7 +46,7 @@ struct default_key_c {
 	unsigned int sector_size;
 	unsigned int sector_bits;
 	struct blk_crypto_key key;
-	bool is_hw_wrapped;
+	enum blk_crypto_key_type key_type;
 	u64 max_dun;
 };
 
@@ -69,16 +65,15 @@ lookup_cipher(const char *cipher_string)
 static void default_key_dtr(struct dm_target *ti)
 {
 	struct default_key_c *dkc = ti->private;
-	int err;
+	struct blk_crypto_key *blk_key = &dkc->key;
 
 	if (dkc->dev) {
-		err = blk_crypto_evict_key(dkc->dev->bdev->bd_queue, &dkc->key);
-		if (err && err != -ENOKEY)
-			DMWARN("Failed to evict crypto key: %d", err);
+		if (blk_key->size > 0)
+			blk_crypto_evict_key(dkc->dev->bdev, blk_key);
 		dm_put_device(ti, dkc->dev);
 	}
-	kzfree(dkc->cipher_string);
-	kzfree(dkc);
+	kfree_sensitive(dkc->cipher_string);
+	kfree_sensitive(dkc);
 }
 
 static int default_key_ctr_optional(struct dm_target *ti,
@@ -121,7 +116,7 @@ static int default_key_ctr_optional(struct dm_target *ti,
 		} else if (!strcmp(opt_string, "iv_large_sectors")) {
 			iv_large_sectors = true;
 		} else if (!strcmp(opt_string, "wrappedkey_v0")) {
-			dkc->is_hw_wrapped = true;
+			dkc->key_type = BLK_CRYPTO_KEY_TYPE_HW_WRAPPED;
 		} else {
 			ti->error = "Invalid feature arguments";
 			return -EINVAL;
@@ -149,8 +144,8 @@ static int default_key_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct default_key_c *dkc;
 	const struct dm_default_key_cipher *cipher;
-	u8 raw_key[DM_DEFAULT_KEY_MAX_WRAPPED_KEY_SIZE];
-	unsigned int raw_key_size;
+	u8 key_bytes[BLK_CRYPTO_MAX_ANY_KEY_SIZE];
+	unsigned int key_size;
 	unsigned int dun_bytes;
 	unsigned long long tmpll;
 	char dummy;
@@ -167,6 +162,7 @@ static int default_key_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		return -ENOMEM;
 	}
 	ti->private = dkc;
+	dkc->key_type = BLK_CRYPTO_KEY_TYPE_RAW;
 
 	/* <cipher> */
 	dkc->cipher_string = kstrdup(argv[0], GFP_KERNEL);
@@ -183,15 +179,14 @@ static int default_key_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 
 	/* <key> */
-	raw_key_size = strlen(argv[1]);
-	if (raw_key_size > 2 * DM_DEFAULT_KEY_MAX_WRAPPED_KEY_SIZE ||
-	    raw_key_size % 2) {
+	key_size = strlen(argv[1]);
+	if (key_size > 2 * BLK_CRYPTO_MAX_ANY_KEY_SIZE || key_size % 2) {
 		ti->error = "Invalid keysize";
 		err = -EINVAL;
 		goto bad;
 	}
-	raw_key_size /= 2;
-	if (hex2bin(raw_key, argv[1], raw_key_size) != 0) {
+	key_size /= 2;
+	if (hex2bin(key_bytes, argv[1], key_size) != 0) {
 		ti->error = "Malformed key string";
 		err = -EINVAL;
 		goto bad;
@@ -221,6 +216,22 @@ static int default_key_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 	dkc->start = tmpll;
 
+	if (bdev_is_zoned(dkc->dev->bdev)) {
+		/*
+		 * All zone append writes to a zone of a zoned block device will
+		 * have the same BIO sector, the start of the zone. When the
+		 * cypher IV mode uses sector values, all data targeting a
+		 * zone will be encrypted using the first sector numbers of the
+		 * zone. This will not result in write errors but will
+		 * cause most reads to fail as reads will use the sector values
+		 * for the actual data locations, resulting in IV mismatch.
+		 * To avoid this problem, ask DM core to emulate zone append
+		 * operations with regular writes.
+		 */
+		DMDEBUG("Zone append operations will be emulated");
+		ti->emulate_zone_append = true;
+	}
+
 	/* optional arguments */
 	dkc->sector_size = SECTOR_SIZE;
 	if (argc > 5) {
@@ -239,25 +250,22 @@ static int default_key_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		       (dkc->sector_bits - SECTOR_SHIFT);
 	dun_bytes = DIV_ROUND_UP(fls64(dkc->max_dun), 8);
 
-	err = blk_crypto_init_key(&dkc->key, raw_key, raw_key_size,
-				  dkc->is_hw_wrapped, cipher->mode_num,
+	err = blk_crypto_init_key(&dkc->key, key_bytes, key_size,
+				  dkc->key_type, cipher->mode_num,
 				  dun_bytes, dkc->sector_size);
 	if (err) {
 		ti->error = "Error initializing blk-crypto key";
 		goto bad;
 	}
 
-	err = blk_crypto_start_using_mode(cipher->mode_num, dun_bytes,
-					  dkc->sector_size, dkc->is_hw_wrapped,
-					  dkc->dev->bdev->bd_queue);
+	err = blk_crypto_start_using_key(dkc->dev->bdev, &dkc->key);
 	if (err) {
 		ti->error = "Error starting to use blk-crypto";
 		goto bad;
 	}
 
 	ti->num_flush_bios = 1;
-
-	ti->may_passthrough_inline_crypto = true;
+	ti->flush_bypasses_map = true;
 
 	err = 0;
 	goto out;
@@ -265,7 +273,7 @@ static int default_key_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 bad:
 	default_key_dtr(ti);
 out:
-	memzero_explicit(raw_key, sizeof(raw_key));
+	memzero_explicit(key_bytes, sizeof(key_bytes));
 	return err;
 }
 
@@ -331,6 +339,7 @@ static void default_key_status(struct dm_target *ti, status_type_t type,
 
 	switch (type) {
 	case STATUSTYPE_INFO:
+	case STATUSTYPE_IMA:
 		result[0] = '\0';
 		break;
 
@@ -342,7 +351,7 @@ static void default_key_status(struct dm_target *ti, status_type_t type,
 		num_feature_args += !!ti->num_discard_bios;
 		if (dkc->sector_size != SECTOR_SIZE)
 			num_feature_args += 2;
-		if (dkc->is_hw_wrapped)
+		if (dkc->key_type == BLK_CRYPTO_KEY_TYPE_HW_WRAPPED)
 			num_feature_args += 1;
 		if (num_feature_args != 0) {
 			DMEMIT(" %d", num_feature_args);
@@ -352,7 +361,7 @@ static void default_key_status(struct dm_target *ti, status_type_t type,
 				DMEMIT(" sector_size:%u", dkc->sector_size);
 				DMEMIT(" iv_large_sectors");
 			}
-			if (dkc->is_hw_wrapped)
+			if (dkc->key_type == BLK_CRYPTO_KEY_TYPE_HW_WRAPPED)
 				DMEMIT(" wrappedkey_v0");
 		}
 		break;
@@ -361,7 +370,8 @@ static void default_key_status(struct dm_target *ti, status_type_t type,
 
 static int default_key_prepare_ioctl(struct dm_target *ti,
 				     struct block_device **bdev,
-				     fmode_t *mode)
+				     unsigned int cmd, unsigned long arg,
+				     bool *forward)
 {
 	const struct default_key_c *dkc = ti->private;
 	const struct dm_dev *dev = dkc->dev;
@@ -370,7 +380,7 @@ static int default_key_prepare_ioctl(struct dm_target *ti,
 
 	/* Only pass ioctls through if the device sizes match exactly. */
 	if (dkc->start != 0 ||
-	    ti->len != i_size_read(dev->bdev->bd_inode) >> SECTOR_SHIFT)
+	    ti->len != bdev_nr_sectors(dev->bdev))
 		return 1;
 	return 0;
 }
@@ -391,15 +401,32 @@ static void default_key_io_hints(struct dm_target *ti,
 	const unsigned int sector_size = dkc->sector_size;
 
 	limits->logical_block_size =
-		max_t(unsigned short, limits->logical_block_size, sector_size);
+		max_t(unsigned int, limits->logical_block_size, sector_size);
 	limits->physical_block_size =
 		max_t(unsigned int, limits->physical_block_size, sector_size);
 	limits->io_min = max_t(unsigned int, limits->io_min, sector_size);
+	limits->features |= BLK_FEAT_ORDERED_HWQ;
 }
+
+#ifdef CONFIG_BLK_DEV_ZONED
+static int default_key_report_zones(struct dm_target *ti,
+		struct dm_report_zones_args *args, unsigned int nr_zones)
+{
+	struct default_key_c *dkc = ti->private;
+
+	return dm_report_zones(dkc->dev->bdev, dkc->start,
+			dkc->start + dm_target_offset(ti, args->next_sector),
+			args, nr_zones);
+}
+#else
+#define default_key_report_zones NULL
+#endif
 
 static struct target_type default_key_target = {
 	.name			= "default-key",
 	.version		= {2, 1, 0},
+	.features		= DM_TARGET_PASSES_CRYPTO | DM_TARGET_ZONED_HM,
+	.report_zones		= default_key_report_zones,
 	.module			= THIS_MODULE,
 	.ctr			= default_key_ctr,
 	.dtr			= default_key_dtr,

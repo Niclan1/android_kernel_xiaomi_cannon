@@ -35,14 +35,14 @@
   *  - Arnaldo Carvalho de Melo <acme@conectiva.com.br>
   */
 
-#define ARCH_HAS_IOREMAP_WC
-#define ARCH_HAS_IOREMAP_WT
-
 #include <linux/string.h>
 #include <linux/compiler.h>
+#include <linux/cc_platform.h>
 #include <asm/page.h>
 #include <asm/early_ioremap.h>
 #include <asm/pgtable_types.h>
+#include <asm/shared/io.h>
+#include <asm/special_insns.h>
 
 #define build_mmio_read(name, size, type, reg, barrier) \
 static inline type name(const volatile void __iomem *addr) \
@@ -54,62 +54,90 @@ static inline void name(type val, volatile void __iomem *addr) \
 { asm volatile("mov" size " %0,%1": :reg (val), \
 "m" (*(volatile type __force *)addr) barrier); }
 
-build_mmio_read(readb, "b", unsigned char, "=q", :"memory")
-build_mmio_read(readw, "w", unsigned short, "=r", :"memory")
-build_mmio_read(readl, "l", unsigned int, "=r", :"memory")
+build_mmio_read(raw_readb, "b", unsigned char, "=q", : "memory")
+build_mmio_read(raw_readw, "w", unsigned short, "=r", : "memory")
+build_mmio_read(raw_readl, "l", unsigned int, "=r", : "memory")
 
-build_mmio_read(__readb, "b", unsigned char, "=q", )
-build_mmio_read(__readw, "w", unsigned short, "=r", )
-build_mmio_read(__readl, "l", unsigned int, "=r", )
+build_mmio_read(raw_readb_relaxed, "b", unsigned char, "=q", )
+build_mmio_read(raw_readw_relaxed, "w", unsigned short, "=r", )
+build_mmio_read(raw_readl_relaxed, "l", unsigned int, "=r", )
 
-build_mmio_write(writeb, "b", unsigned char, "q", :"memory")
-build_mmio_write(writew, "w", unsigned short, "r", :"memory")
-build_mmio_write(writel, "l", unsigned int, "r", :"memory")
+build_mmio_write(raw_writeb, "b", unsigned char, "q", : "memory")
+build_mmio_write(raw_writew, "w", unsigned short, "r", : "memory")
+build_mmio_write(raw_writel, "l", unsigned int, "r", : "memory")
 
-build_mmio_write(__writeb, "b", unsigned char, "q", )
-build_mmio_write(__writew, "w", unsigned short, "r", )
-build_mmio_write(__writel, "l", unsigned int, "r", )
+build_mmio_write(raw_writeb_relaxed, "b", unsigned char, "q", )
+build_mmio_write(raw_writew_relaxed, "w", unsigned short, "r", )
+build_mmio_write(raw_writel_relaxed, "l", unsigned int, "r", )
 
-#define readb readb
-#define readw readw
-#define readl readl
-#define readb_relaxed(a) __readb(a)
-#define readw_relaxed(a) __readw(a)
-#define readl_relaxed(a) __readl(a)
-#define __raw_readb __readb
-#define __raw_readw __readw
-#define __raw_readl __readl
+#ifdef CONFIG_PARAVIRT
+#include <asm/paravirt.h>
+#define __pv_mmio_read(native, pv, addr)				\
+	(static_branch_unlikely(&pv_mmio) ? pv(addr) :	native(addr))
+#define __pv_mmio_write(native, pv, val, addr)				\
+	(static_branch_unlikely(&pv_mmio) ? pv(val, addr) : native(val, addr))
+#define readb(a)		__pv_mmio_read(raw_readb, pv_readb, a)
+#define readw(a)		__pv_mmio_read(raw_readw, pv_readw, a)
+#define readl(a)		__pv_mmio_read(raw_readl, pv_readl, a)
+#define __raw_readb(a)		__pv_mmio_read(raw_readb_relaxed, pv_readb_relaxed, a)
+#define __raw_readw(a)		__pv_mmio_read(raw_readw_relaxed, pv_readw_relaxed, a)
+#define __raw_readl(a)		__pv_mmio_read(raw_readl_relaxed, pv_readl_relaxed, a)
+#define writeb(v, a)		__pv_mmio_write(raw_writeb, pv_writeb, v, a)
+#define writew(v, a)		__pv_mmio_write(raw_writew, pv_writew, v, a)
+#define writel(v, a)		__pv_mmio_write(raw_writel, pv_writel, v, a)
+#define __raw_writeb(v, a)	__pv_mmio_write(raw_writeb_relaxed, pv_writeb_relaxed, v, a)
+#define __raw_writew(v, a)	__pv_mmio_write(raw_writew_relaxed, pv_writew_relaxed, v, a)
+#define __raw_writel(v, a)	__pv_mmio_write(raw_writel_relaxed, pv_writel_relaxed, v, a)
+#else
+#define readb raw_readb
+#define readw raw_readw
+#define readl raw_readl
+#define __raw_readb raw_readb_relaxed
+#define __raw_readw raw_readw_relaxed
+#define __raw_readl raw_readl_relaxed
+#define writeb raw_writeb
+#define writew raw_writew
+#define writel raw_writel
+#define __raw_writeb raw_writeb_relaxed
+#define __raw_writew raw_writew_relaxed
+#define __raw_writel raw_writel_relaxed
+#endif
 
-#define writeb writeb
-#define writew writew
-#define writel writel
-#define writeb_relaxed(v, a) __writeb(v, a)
-#define writew_relaxed(v, a) __writew(v, a)
-#define writel_relaxed(v, a) __writel(v, a)
-#define __raw_writeb __writeb
-#define __raw_writew __writew
-#define __raw_writel __writel
+#define readb_relaxed(a) __raw_readb(a)
+#define readw_relaxed(a) __raw_readw(a)
+#define readl_relaxed(a) __raw_readl(a)
 
-#define mmiowb() barrier()
+#define writeb_relaxed(v, a) __raw_writeb(v, a)
+#define writew_relaxed(v, a) __raw_writew(v, a)
+#define writel_relaxed(v, a) __raw_writel(v, a)
 
 #ifdef CONFIG_X86_64
 
-build_mmio_read(readq, "q", unsigned long, "=r", :"memory")
-build_mmio_read(__readq, "q", unsigned long, "=r", )
-build_mmio_write(writeq, "q", unsigned long, "r", :"memory")
-build_mmio_write(__writeq, "q", unsigned long, "r", )
+build_mmio_read(raw_readq, "q", u64, "=r", : "memory")
+build_mmio_read(raw_readq_relaxed, "q", u64, "=r", )
+build_mmio_write(raw_writeq, "q", u64, "r", : "memory")
+build_mmio_write(raw_writeq_relaxed, "q", u64, "r", )
 
-#define readq_relaxed(a)	__readq(a)
-#define writeq_relaxed(v, a)	__writeq(v, a)
+#ifdef CONFIG_PARAVIRT
+#define readq(a)		__pv_mmio_read(raw_readq, pv_readq, a)
+#define __raw_readq(a)		__pv_mmio_read(raw_readq_relaxed, pv_readq_relaxed, a)
+#define writeq(v, a)		__pv_mmio_write(raw_writeq, pv_writeq, v, a)
+#define __raw_writeq(v, a)	__pv_mmio_write(raw_writeq_relaxed, pv_writeq_relaxed, v, a)
+#else
+#define readq			raw_readq
+#define __raw_readq		raw_readq_relaxed
+#define writeq			raw_writeq
+#define __raw_writeq		raw_writeq_relaxed
+#endif
 
-#define __raw_readq		__readq
-#define __raw_writeq		__writeq
-
-/* Let people know that we have them */
-#define readq			readq
-#define writeq			writeq
+#define readq_relaxed(a)	__raw_readq(a)
+#define writeq_relaxed(v, a)	__raw_writeq(v, a)
 
 #endif
+
+#define ARCH_HAS_VALID_PHYS_ADDR_RANGE
+extern int valid_phys_addr_range(phys_addr_t addr, size_t size);
+extern int valid_mmap_phys_addr_range(unsigned long pfn, size_t size);
 
 /**
  *	virt_to_phys	-	map virtual addresses to physical
@@ -150,44 +178,31 @@ static inline void *phys_to_virt(phys_addr_t address)
 #define phys_to_virt phys_to_virt
 
 /*
- * Change "struct page" to physical address.
- */
-#define page_to_phys(page)    ((dma_addr_t)page_to_pfn(page) << PAGE_SHIFT)
-
-/*
  * ISA I/O bus memory addresses are 1:1 with the physical address.
  * However, we truncate the address to unsigned int to avoid undesirable
- * promitions in legacy drivers.
+ * promotions in legacy drivers.
  */
 static inline unsigned int isa_virt_to_bus(volatile void *address)
 {
 	return (unsigned int)virt_to_phys(address);
 }
-#define isa_page_to_bus(page)	((unsigned int)page_to_phys(page))
 #define isa_bus_to_virt		phys_to_virt
-
-/*
- * However PCI ones are not necessarily 1:1 and therefore these interfaces
- * are forbidden in portable PCI drivers.
- *
- * Allow them on x86 for legacy drivers, though.
- */
-#define virt_to_bus virt_to_phys
-#define bus_to_virt phys_to_virt
 
 /*
  * The default ioremap() behavior is non-cached; if you need something
  * else, you probably want one of the following.
  */
-extern void __iomem *ioremap_nocache(resource_size_t offset, unsigned long size);
-#define ioremap_nocache ioremap_nocache
 extern void __iomem *ioremap_uc(resource_size_t offset, unsigned long size);
 #define ioremap_uc ioremap_uc
-
 extern void __iomem *ioremap_cache(resource_size_t offset, unsigned long size);
 #define ioremap_cache ioremap_cache
-extern void __iomem *ioremap_prot(resource_size_t offset, unsigned long size, unsigned long prot_val);
+extern void __iomem *ioremap_prot(resource_size_t offset, unsigned long size,  pgprot_t prot);
 #define ioremap_prot ioremap_prot
+extern void __iomem *ioremap_encrypted(resource_size_t phys_addr, unsigned long size);
+#define ioremap_encrypted ioremap_encrypted
+
+void *arch_memremap_wb(phys_addr_t phys_addr, size_t size, unsigned long flags);
+#define arch_memremap_wb arch_memremap_wb
 
 /**
  * ioremap     -   map bus memory into CPU space
@@ -203,20 +218,38 @@ extern void __iomem *ioremap_prot(resource_size_t offset, unsigned long size, un
  * If the area you are trying to map is a PCI BAR you should have a
  * look at pci_iomap().
  */
-static inline void __iomem *ioremap(resource_size_t offset, unsigned long size)
-{
-	return ioremap_nocache(offset, size);
-}
+void __iomem *ioremap(resource_size_t offset, unsigned long size);
 #define ioremap ioremap
 
 extern void iounmap(volatile void __iomem *addr);
 #define iounmap iounmap
 
-extern void set_iounmap_nonlazy(void);
-
 #ifdef __KERNEL__
 
-#include <asm-generic/iomap.h>
+void memcpy_fromio(void *, const volatile void __iomem *, size_t);
+void memcpy_toio(volatile void __iomem *, const void *, size_t);
+void memset_io(volatile void __iomem *, int, size_t);
+
+#define memcpy_fromio memcpy_fromio
+#define memcpy_toio memcpy_toio
+#define memset_io memset_io
+
+#ifdef CONFIG_X86_64
+/*
+ * Commit 0f07496144c2 ("[PATCH] Add faster __iowrite32_copy routine for
+ * x86_64") says that circa 2006 rep movsl is noticeably faster than a copy
+ * loop.
+ */
+static inline void __iowrite32_copy(void __iomem *to, const void *from,
+				    size_t count)
+{
+	asm volatile("rep movsl"
+		     : "=&c"(count), "=&D"(to), "=&S"(from)
+		     : "0"(count), "1"(to), "2"(from)
+		     : "memory");
+}
+#define __iowrite32_copy __iowrite32_copy
+#endif
 
 /*
  * ISA space is 'always mapped' on a typical x86 system, no need to
@@ -227,21 +260,6 @@ extern void set_iounmap_nonlazy(void);
  * analogy with PCI is quite large):
  */
 #define __ISA_IO_base ((char __iomem *)(PAGE_OFFSET))
-
-/*
- *	Cache management
- *
- *	This needed for two cases
- *	1. Out of order aware processors
- *	2. Accidentally out of order processors (PPro errata #51)
- */
-
-static inline void flush_write_buffers(void)
-{
-#if defined(CONFIG_X86_PPRO_FENCE)
-	asm volatile("lock; addl $0,0(%%esp)": : :"memory");
-#endif
-}
 
 #endif /* __KERNEL__ */
 
@@ -266,53 +284,57 @@ static inline void slow_down_io(void)
 
 #endif
 
-#define BUILDIO(bwl, bw, type)						\
-static inline void out##bwl(unsigned type value, int port)		\
-{									\
-	asm volatile("out" #bwl " %" #bw "0, %w1"			\
-		     : : "a"(value), "Nd"(port));			\
-}									\
-									\
-static inline unsigned type in##bwl(int port)				\
-{									\
-	unsigned type value;						\
-	asm volatile("in" #bwl " %w1, %" #bw "0"			\
-		     : "=a"(value) : "Nd"(port));			\
-	return value;							\
-}									\
-									\
-static inline void out##bwl##_p(unsigned type value, int port)		\
+#define BUILDIO(bwl, type)						\
+static inline void out##bwl##_p(type value, u16 port)			\
 {									\
 	out##bwl(value, port);						\
 	slow_down_io();							\
 }									\
 									\
-static inline unsigned type in##bwl##_p(int port)			\
+static inline type in##bwl##_p(u16 port)				\
 {									\
-	unsigned type value = in##bwl(port);				\
+	type value = in##bwl(port);					\
 	slow_down_io();							\
 	return value;							\
 }									\
 									\
-static inline void outs##bwl(int port, const void *addr, unsigned long count) \
+static inline void outs##bwl(u16 port, const void *addr, unsigned long count) \
 {									\
-	asm volatile("rep; outs" #bwl					\
-		     : "+S"(addr), "+c"(count) : "d"(port) : "memory");	\
+	if (cc_platform_has(CC_ATTR_GUEST_UNROLL_STRING_IO)) {		\
+		type *value = (type *)addr;				\
+		while (count) {						\
+			out##bwl(*value, port);				\
+			value++;					\
+			count--;					\
+		}							\
+	} else {							\
+		asm volatile("rep outs" #bwl				\
+			     : "+S"(addr), "+c"(count)			\
+			     : "d"(port) : "memory");			\
+	}								\
 }									\
 									\
-static inline void ins##bwl(int port, void *addr, unsigned long count)	\
+static inline void ins##bwl(u16 port, void *addr, unsigned long count)	\
 {									\
-	asm volatile("rep; ins" #bwl					\
-		     : "+D"(addr), "+c"(count) : "d"(port) : "memory");	\
+	if (cc_platform_has(CC_ATTR_GUEST_UNROLL_STRING_IO)) {		\
+		type *value = (type *)addr;				\
+		while (count) {						\
+			*value = in##bwl(port);				\
+			value++;					\
+			count--;					\
+		}							\
+	} else {							\
+		asm volatile("rep ins" #bwl				\
+			     : "+D"(addr), "+c"(count)			\
+			     : "d"(port) : "memory");			\
+	}								\
 }
 
-BUILDIO(b, b, char)
-BUILDIO(w, w, short)
-BUILDIO(l, , int)
+BUILDIO(b, u8)
+BUILDIO(w, u16)
+BUILDIO(l, u32)
+#undef BUILDIO
 
-#define inb inb
-#define inw inw
-#define inl inl
 #define inb_p inb_p
 #define inw_p inw_p
 #define inl_p inl_p
@@ -320,9 +342,6 @@ BUILDIO(l, , int)
 #define insw insw
 #define insl insl
 
-#define outb outb
-#define outw outw
-#define outl outl
 #define outb_p outb_p
 #define outw_p outw_p
 #define outl_p outl_p
@@ -345,18 +364,6 @@ extern void __iomem *ioremap_wt(resource_size_t offset, unsigned long size);
 
 extern bool is_early_ioremap_ptep(pte_t *ptep);
 
-#ifdef CONFIG_XEN
-#include <xen/xen.h>
-struct bio_vec;
-
-extern bool xen_biovec_phys_mergeable(const struct bio_vec *vec1,
-				      const struct bio_vec *vec2);
-
-#define BIOVEC_PHYS_MERGEABLE(vec1, vec2)				\
-	(__BIOVEC_PHYS_MERGEABLE(vec1, vec2) &&				\
-	 (!xen_domain() || xen_biovec_phys_mergeable(vec1, vec2)))
-#endif	/* CONFIG_XEN */
-
 #define IO_SPACE_LIMIT 0xffff
 
 #include <asm-generic/io.h>
@@ -378,6 +385,7 @@ extern void arch_io_free_memtype_wc(resource_size_t start, resource_size_t size)
 #define arch_io_reserve_memtype_wc arch_io_reserve_memtype_wc
 #endif
 
+#ifdef CONFIG_AMD_MEM_ENCRYPT
 extern bool arch_memremap_can_ram_remap(resource_size_t offset,
 					unsigned long size,
 					unsigned long flags);
@@ -385,5 +393,37 @@ extern bool arch_memremap_can_ram_remap(resource_size_t offset,
 
 extern bool phys_mem_access_encrypted(unsigned long phys_addr,
 				      unsigned long size);
+#else
+static inline bool phys_mem_access_encrypted(unsigned long phys_addr,
+					     unsigned long size)
+{
+	return true;
+}
+#endif
+
+/**
+ * iosubmit_cmds512 - copy data to single MMIO location, in 512-bit units
+ * @dst: destination, in MMIO space (must be 512-bit aligned)
+ * @src: source
+ * @count: number of 512 bits quantities to submit
+ *
+ * Submit data from kernel space to MMIO space, in units of 512 bits at a
+ * time.  Order of access is not guaranteed, nor is a memory barrier
+ * performed afterwards.
+ *
+ * Warning: Do not use this helper unless your driver has checked that the CPU
+ * instruction is supported on the platform.
+ */
+static inline void iosubmit_cmds512(void __iomem *dst, const void *src,
+				    size_t count)
+{
+	const u8 *from = src;
+	const u8 *end = from + count * 64;
+
+	while (from < end) {
+		movdir64b_io(dst, from);
+		from += 64;
+	}
+}
 
 #endif /* _ASM_X86_IO_H */

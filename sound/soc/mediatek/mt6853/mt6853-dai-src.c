@@ -134,7 +134,7 @@ static unsigned int mtk_get_src_freq_mode(struct mtk_base_afe *afe, int rate)
 	}
 }
 
-const unsigned int *get_iir_coeff(unsigned int rate_in,
+static const unsigned int *get_iir_coeff(unsigned int rate_in,
 				  unsigned int rate_out,
 				  unsigned int *param_num)
 {

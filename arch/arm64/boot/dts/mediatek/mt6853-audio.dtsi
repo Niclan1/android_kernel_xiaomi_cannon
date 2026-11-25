@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Cannong audio additions.
+ *
+ * Kill switches:
+ *   speaker/receiver amps: &i2c6 { status = "disabled"; };
+ *   headset jack:          &mt6359_accdet_jack { status = "disabled"; };
+ */
+
+/*
+ * The AW87519 (speaker) and AW87359 (receiver) amps sit on i2c6. The stock
+ * node keeps the vendor "mediatek,i2c" binding, which i2c-mt65xx does not
+ * match, so the bus and both amps never probed. Use the same binding as i2c5;
+ * the main clock is IMP_IIC_WRAP_N index 0 (CLK_IMPN_AP_CLOCK_RO_I2C6).
+ */
+&i2c6 {
+	compatible = "mediatek,mt6853-i2c";
+	clocks = <&{/syson@11f01000} 0x00 &{/syson@10001000} 0x59>;
+	clock-names = "main", "dma";
+};
+
+/*
+ * VAUD18 powers the MT6359 audio front end; without it a dummy is used.
+ * Stock DT has no mic-type, so the 4.14 driver used DCC for all three mic
+ * inputs; the mainline-based driver would default to Idle.
+ */
+&mt6359codec {
+	vaud18-supply = <&mt_pmic_vaud18_ldo_reg>;
+	mediatek,dmic-mode = <0>;
+	mediatek,mic-type-0 = <3>;	/* DCC */
+	mediatek,mic-type-1 = <3>;	/* DCC */
+	mediatek,mic-type-2 = <3>;	/* DCC */
+};
+
+&sound {
+	mediatek,accdet = <&mt6359_accdet_jack>;
+};
+
+&main_pmic {
+	mt6359_accdet_jack: accdet-jack {
+		compatible = "mediatek,mt6359-accdet";
+		status = "okay";
+		mediatek,mic-vol = <8>;
+		mediatek,plugout-debounce = <1>;
+		mediatek,mic-mode = <2>;
+		mediatek,pwm-deb-setting = <0x500 0x500 0x1 0x1f0
+					    0x800 0x800 0x20 0x44
+					    0x4 0x1 0x5 0x3 0x3 0x5 0xe>;
+		mediatek,eint-use-ext-res = <0>;
+		mediatek,key-mode = <0>;
+		mediatek,three-key-thr = <0 80 220 400>;
+	};
+};

@@ -1,0 +1,23 @@
+What:           /sys/class/leds/vibrator/activate
+Date:           November 2026
+Contact:        linux-leds@vger.kernel.org
+Description:
+                Writing a nonzero value starts a pulse for the configured
+                duration. Writing zero stops it and cancels pending timer
+                work. Reading reports whether the bridge is running.
+
+What:           /sys/class/leds/vibrator/duration
+Date:           November 2026
+Contact:        linux-leds@vger.kernel.org
+Description:
+                Configured pulse duration in milliseconds, clamped to 60000.
+                This is not a remaining-time counter.
+
+What:           /sys/class/leds/vibrator/state
+Date:           November 2026
+Contact:        linux-leds@vger.kernel.org
+Description:
+                Boolean configuration latch for the MediaTek vibrator HAL.
+                Writing this attribute does not start or stop the bridge.
+                It is not cleared on cancellation or expiry; read activate
+                to determine whether the bridge is running.

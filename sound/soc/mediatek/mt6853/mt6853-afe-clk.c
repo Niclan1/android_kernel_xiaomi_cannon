@@ -10,7 +10,6 @@
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
 #include <linux/arm-smccc.h> /* for Kernel Native SMC API */
-#include <mt-plat/mtk_secure_api.h> /* for SMC ID table */
 
 #include "mt6853-afe-common.h"
 #include "mt6853-afe-clk.h"
@@ -28,7 +27,6 @@ static const char *aud_clks[CLK_NUM] = {
 	[CLK_APLL1_TUNER] = "aud_apll1_tuner_clk",
 	[CLK_APLL2_TUNER] = "aud_apll2_tuner_clk",
 	[CLK_NLE] = "aud_nle",
-	[CLK_SCP_SYS_AUD] = "scp_sys_audio",
 	[CLK_INFRA_SYS_AUDIO] = "aud_infra_clk",
 	[CLK_INFRA_AUDIO_26M] = "aud_infra_26m_clk",
 	[CLK_MUX_AUDIO] = "top_mux_audio",
@@ -207,13 +205,6 @@ int mt6853_afe_enable_clock(struct mtk_base_afe *afe)
 
 	dev_info(afe->dev, "%s()\n", __func__);
 
-	ret = clk_prepare_enable(afe_priv->clk[CLK_SCP_SYS_AUD]);
-	if (ret) {
-		dev_err(afe->dev, "%s clk_prepare_enable %s fail %d\n",
-			__func__, aud_clks[CLK_SCP_SYS_AUD], ret);
-		goto CLK_SCP_SYS_AUD_ERR;
-	}
-
 	ret = clk_prepare_enable(afe_priv->clk[CLK_INFRA_SYS_AUDIO]);
 	if (ret) {
 		dev_err(afe->dev, "%s clk_prepare_enable %s fail %d\n",
@@ -281,8 +272,6 @@ CLK_INFRA_AUDIO_26M_ERR:
 	clk_disable_unprepare(afe_priv->clk[CLK_INFRA_AUDIO_26M]);
 CLK_INFRA_SYS_AUDIO_ERR:
 	clk_disable_unprepare(afe_priv->clk[CLK_INFRA_SYS_AUDIO]);
-CLK_SCP_SYS_AUD_ERR:
-	clk_disable_unprepare(afe_priv->clk[CLK_SCP_SYS_AUD]);
 
 	return ret;
 }
@@ -300,7 +289,6 @@ void mt6853_afe_disable_clock(struct mtk_base_afe *afe)
 	clk_disable_unprepare(afe_priv->clk[CLK_MUX_AUDIO]);
 	clk_disable_unprepare(afe_priv->clk[CLK_INFRA_AUDIO_26M]);
 	clk_disable_unprepare(afe_priv->clk[CLK_INFRA_SYS_AUDIO]);
-	clk_disable_unprepare(afe_priv->clk[CLK_SCP_SYS_AUD]);
 }
 
 int mt6853_afe_dram_request(struct device *dev)

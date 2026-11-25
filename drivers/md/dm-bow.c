@@ -5,14 +5,13 @@
  */
 
 #include "dm.h"
-#include "dm-bufio.h"
 #include "dm-core.h"
 
 #include <linux/crc32.h>
+#include <linux/dm-bufio.h>
 #include <linux/module.h>
 
 #define DM_MSG_PREFIX "bow"
-#define SECTOR_SIZE 512
 
 struct log_entry {
 	u64 source;
@@ -88,6 +87,7 @@ struct bow_context {
 	struct mutex ranges_lock; /* Hold to access this struct and/or ranges */
 	struct rb_root ranges;
 	struct dm_kobject_holder kobj_holder;	/* for sysfs attributes */
+	struct mutex state_lock;
 	atomic_t state; /* One of the enum state values above */
 	u64 trims_total;
 	struct log_sector *log_sector;
@@ -95,13 +95,13 @@ struct bow_context {
 	bool forward_trims;
 };
 
-sector_t range_top(struct bow_range *br)
+static sector_t range_top(struct bow_range *br)
 {
 	return container_of(rb_next(&br->node), struct bow_range, node)
 		->sector;
 }
 
-u64 range_size(struct bow_range *br)
+static u64 range_size(struct bow_range *br)
 {
 	return (range_top(br) - br->sector) * SECTOR_SIZE;
 }
@@ -146,8 +146,8 @@ static struct bow_range *find_first_overlapping_range(struct rb_root *ranges,
 	return br;
 }
 
-void add_before(struct rb_root *ranges, struct bow_range *new_br,
-		struct bow_range *existing)
+static void add_before(struct rb_root *ranges, struct bow_range *new_br,
+		       struct bow_range *existing)
 {
 	struct rb_node *parent = &(existing->node);
 	struct rb_node **link = &(parent->rb_left);
@@ -447,7 +447,6 @@ static int prepare_log(struct bow_context *bc)
 	ret = split_range(bc, &free_br, &bi_iter);
 	if (ret)
 		return ret;
-	free_br->type = SECTOR0_CURRENT;
 
 	/* Copy data */
 	ret = copy_data(bc, first_br, free_br, NULL);
@@ -455,6 +454,8 @@ static int prepare_log(struct bow_context *bc)
 		return ret;
 
 	bc->log_sector->sector0 = free_br->sector;
+
+	set_type(bc, &free_br, SECTOR0_CURRENT);
 
 	/* Find free sector to back up original sector zero */
 	free_br = find_free_range(bc);
@@ -526,6 +527,12 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 		return -EINVAL;
 	}
 
+	/* Block new writes until state change is complete. */
+	mutex_lock(&bc->state_lock);
+
+	/* Flush any already-queued writes before the state change. */
+	flush_workqueue(bc->workqueue);
+
 	mutex_lock(&bc->ranges_lock);
 	original_state = atomic_read(&bc->state);
 	if (state != original_state + 1) {
@@ -561,6 +568,8 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 
 bad:
 	mutex_unlock(&bc->ranges_lock);
+	mutex_unlock(&bc->state_lock);
+
 	return ret;
 }
 
@@ -586,10 +595,11 @@ static struct attribute *bow_attrs[] = {
 	&attr_free.attr,
 	NULL
 };
+ATTRIBUTE_GROUPS(bow);
 
 static struct kobj_type bow_ktype = {
 	.sysfs_ops = &kobj_sysfs_ops,
-	.default_attrs = bow_attrs,
+	.default_groups = bow_groups,
 	.release = dm_kobject_release
 };
 
@@ -600,24 +610,28 @@ static void dm_bow_dtr(struct dm_target *ti)
 	struct bow_context *bc = (struct bow_context *) ti->private;
 	struct kobject *kobj;
 
-	while (rb_first(&bc->ranges)) {
-		struct bow_range *br = container_of(rb_first(&bc->ranges),
-						    struct bow_range, node);
-
-		rb_erase(&br->node, &bc->ranges);
-		kfree(br);
-	}
-	if (bc->workqueue)
-		destroy_workqueue(bc->workqueue);
-	if (bc->bufio)
-		dm_bufio_client_destroy(bc->bufio);
-
 	kobj = &bc->kobj_holder.kobj;
 	if (kobj->state_initialized) {
 		kobject_put(kobj);
 		wait_for_completion(dm_get_completion_from_kobject(kobj));
 	}
 
+	if (bc->workqueue)
+		destroy_workqueue(bc->workqueue);
+	if (bc->bufio)
+		dm_bufio_client_destroy(bc->bufio);
+
+	mutex_lock(&bc->ranges_lock);
+	while (rb_first(&bc->ranges)) {
+		struct bow_range *br = container_of(rb_first(&bc->ranges),
+					      struct bow_range, node);
+
+		rb_erase(&br->node, &bc->ranges);
+		kfree(br);
+	}
+	mutex_unlock(&bc->ranges_lock);
+
+	mutex_destroy(&bc->ranges_lock);
 	kfree(bc->log_sector);
 	kfree(bc);
 }
@@ -628,7 +642,7 @@ static void dm_bow_io_hints(struct dm_target *ti, struct queue_limits *limits)
 	const unsigned int block_size = bc->block_size;
 
 	limits->logical_block_size =
-		max_t(unsigned short, limits->logical_block_size, block_size);
+		max_t(unsigned int, limits->logical_block_size, block_size);
 	limits->physical_block_size =
 		max_t(unsigned int, limits->physical_block_size, block_size);
 	limits->io_min = max_t(unsigned int, limits->io_min, block_size);
@@ -644,8 +658,7 @@ static void dm_bow_io_hints(struct dm_target *ti, struct queue_limits *limits)
 	}
 }
 
-static int dm_bow_ctr_optional(struct dm_target *ti, unsigned int argc,
-		char **argv)
+static int dm_bow_ctr_optional(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct bow_context *bc = ti->private;
 	struct dm_arg_set as;
@@ -693,7 +706,6 @@ static int dm_bow_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	struct bow_context *bc;
 	struct bow_range *br;
 	int ret;
-	struct mapped_device *md = dm_table_get_md(ti->table);
 
 	if (argc < 1) {
 		ti->error = "Invalid argument count";
@@ -708,7 +720,6 @@ static int dm_bow_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 
 	ti->num_flush_bios = 1;
 	ti->num_discard_bios = 1;
-	ti->num_write_same_bios = 1;
 	ti->private = bc;
 
 	ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table),
@@ -718,7 +729,8 @@ static int dm_bow_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad;
 	}
 
-	bc->block_size = bc->dev->bdev->bd_queue->limits.logical_block_size;
+	bc->block_size =
+		bdev_get_queue(bc->dev->bdev)->limits.logical_block_size;
 	if (argc > 1) {
 		ret = dm_bow_ctr_optional(ti, argc - 1, &argv[1]);
 		if (ret)
@@ -733,18 +745,11 @@ static int dm_bow_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 
 	init_completion(&bc->kobj_holder.completion);
-	ret = kobject_init_and_add(&bc->kobj_holder.kobj, &bow_ktype,
-				   &disk_to_dev(dm_disk(md))->kobj, "%s",
-				   "bow");
-	if (ret) {
-		ti->error = "Cannot create sysfs node";
-		goto bad;
-	}
-
+	mutex_init(&bc->state_lock);
 	mutex_init(&bc->ranges_lock);
 	bc->ranges = RB_ROOT;
 	bc->bufio = dm_bufio_client_create(bc->dev->bdev, bc->block_size, 1, 0,
-					   NULL, NULL);
+					   NULL, NULL, 0);
 	if (IS_ERR(bc->bufio)) {
 		ti->error = "Cannot initialize dm-bufio";
 		ret = PTR_ERR(bc->bufio);
@@ -789,13 +794,28 @@ static int dm_bow_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	rb_insert_color(&br->node, &bc->ranges);
 
 	ti->discards_supported = true;
-	ti->may_passthrough_inline_crypto = true;
 
 	return 0;
 
 bad:
 	dm_bow_dtr(ti);
 	return ret;
+}
+
+static void dm_bow_resume(struct dm_target *ti)
+{
+	struct mapped_device *md = dm_table_get_md(ti->table);
+	struct bow_context *bc = ti->private;
+	int ret;
+
+	if (bc->kobj_holder.kobj.state_initialized)
+		return;
+
+	ret = kobject_init_and_add(&bc->kobj_holder.kobj, &bow_ktype,
+				   &disk_to_dev(dm_disk(md))->kobj, "%s",
+				   "bow");
+	if (ret)
+		ti->error = "Cannot create sysfs node";
 }
 
 /****** Handle writes ******/
@@ -993,7 +1013,7 @@ static int handle_sector0(struct bow_context *bc, struct bio *bio)
 		struct bio * split = bio_split(bio,
 					       bc->block_size >> SECTOR_SHIFT,
 					       GFP_NOIO,
-					       fs_bio_set);
+					       &fs_bio_set);
 		if (!split) {
 			DMERR("Failed to split bio");
 			bio->bi_status = BLK_STS_RESOURCE;
@@ -1092,7 +1112,7 @@ static int remove_trim(struct bow_context *bc, struct bio *bio)
 	return DM_MAPIO_REMAPPED;
 }
 
-int remap_unless_illegal_trim(struct bow_context *bc, struct bio *bio)
+static int remap_unless_illegal_trim(struct bow_context *bc, struct bio *bio)
 {
 	if (!bc->forward_trims && bio_op(bio) == REQ_OP_DISCARD) {
 		bio->bi_status = BLK_STS_NOTSUPP;
@@ -1111,11 +1131,23 @@ static int dm_bow_map(struct dm_target *ti, struct bio *bio)
 	int ret = DM_MAPIO_REMAPPED;
 	struct bow_context *bc = ti->private;
 
+	/* Fast path when already committed or when performing a read. */
+
 	if (likely(bc->state.counter == COMMITTED))
 		return remap_unless_illegal_trim(bc, bio);
 
 	if (bio_data_dir(bio) == READ && bio->bi_iter.bi_sector != 0)
 		return remap_unless_illegal_trim(bc, bio);
+
+	if (bio->bi_iter.bi_size == 0)
+		return remap_unless_illegal_trim(bc, bio);
+
+	/*
+	 * Fall back to the slower path when we may be in TRIM/CHECKPOINT.
+	 * Operations must wait for any pending state changes to complete.
+	 */
+
+	mutex_lock(&bc->state_lock);
 
 	if (atomic_read(&bc->state) != COMMITTED) {
 		enum state state;
@@ -1127,20 +1159,28 @@ static int dm_bow_map(struct dm_target *ti, struct bio *bio)
 				ret = add_trim(bc, bio);
 			else if (bio_data_dir(bio) == WRITE)
 				ret = remove_trim(bc, bio);
-			else
-				/* pass-through */;
+			/* else pass-through */
 		} else if (state == CHECKPOINT) {
 			if (bio->bi_iter.bi_sector == 0)
 				ret = handle_sector0(bc, bio);
-			else if (bio_data_dir(bio) == WRITE)
+			else if (bio_op(bio) == REQ_OP_DISCARD) {
+				/*
+				 * Ignore discard requests in CHECKPOINT state.
+				 * Passing them through would physically erase data that we
+				 * are trying to protect, creating a state mismatch.
+				 * We complete the bio with success and stop processing.
+				 */
+				bio_endio(bio);
+				ret = DM_MAPIO_SUBMITTED;
+			} else if (bio_data_dir(bio) == WRITE)
 				ret = queue_write(bc, bio);
-			else
-				/* pass-through */;
-		} else {
-			/* pass-through */
+			/* else pass-through */
 		}
+		/* else pass-through */
 		mutex_unlock(&bc->ranges_lock);
 	}
+
+	mutex_unlock(&bc->state_lock);
 
 	if (ret == DM_MAPIO_REMAPPED)
 		return remap_unless_illegal_trim(bc, bio);
@@ -1183,6 +1223,7 @@ static void dm_bow_tablestatus(struct dm_target *ti, char *result,
 		return;
 	}
 
+	mutex_lock(&bc->ranges_lock);
 	for (i = rb_first(&bc->ranges); i; i = rb_next(i)) {
 		struct bow_range *br = container_of(i, struct bow_range, node);
 
@@ -1190,11 +1231,11 @@ static void dm_bow_tablestatus(struct dm_target *ti, char *result,
 				    readable_type[br->type],
 				    (unsigned long long)br->sector);
 		if (result >= end)
-			return;
+			goto unlock;
 
 		result += scnprintf(result, end - result, "\n");
 		if (result >= end)
-			return;
+			goto unlock;
 
 		if (br->type == TRIMMED)
 			++trimmed_range_count;
@@ -1216,19 +1257,22 @@ static void dm_bow_tablestatus(struct dm_target *ti, char *result,
 		if (!rb_next(i)) {
 			scnprintf(result, end - result,
 				  "\nERROR: Last range not of type TOP");
-			return;
+			goto unlock;
 		}
 
 		if (br->sector > range_top(br)) {
 			scnprintf(result, end - result,
 				  "\nERROR: sectors out of order");
-			return;
+			goto unlock;
 		}
 	}
 
 	if (trimmed_range_count != trimmed_list_length)
 		scnprintf(result, end - result,
 			  "\nERROR: not all trimmed ranges in trimmed list");
+
+unlock:
+	mutex_unlock(&bc->ranges_lock);
 }
 
 static void dm_bow_status(struct dm_target *ti, status_type_t type,
@@ -1237,6 +1281,7 @@ static void dm_bow_status(struct dm_target *ti, status_type_t type,
 {
 	switch (type) {
 	case STATUSTYPE_INFO:
+	case STATUSTYPE_IMA:
 		if (maxlen)
 			result[0] = 0;
 		break;
@@ -1247,15 +1292,17 @@ static void dm_bow_status(struct dm_target *ti, status_type_t type,
 	}
 }
 
-int dm_bow_prepare_ioctl(struct dm_target *ti, struct block_device **bdev,
-			 fmode_t *mode)
+static int dm_bow_prepare_ioctl(struct dm_target *ti,
+				struct block_device **bdev,
+				unsigned int cmd, unsigned long arg,
+				bool *forward)
 {
 	struct bow_context *bc = ti->private;
 	struct dm_dev *dev = bc->dev;
 
 	*bdev = dev->bdev;
 	/* Only pass ioctls through if the device sizes match exactly. */
-	return ti->len != i_size_read(dev->bdev->bd_inode) >> SECTOR_SHIFT;
+	return ti->len != bdev_nr_sectors(dev->bdev);
 }
 
 static int dm_bow_iterate_devices(struct dm_target *ti,
@@ -1269,8 +1316,10 @@ static int dm_bow_iterate_devices(struct dm_target *ti,
 static struct target_type bow_target = {
 	.name   = "bow",
 	.version = {1, 2, 0},
+	.features = DM_TARGET_PASSES_CRYPTO,
 	.module = THIS_MODULE,
 	.ctr    = dm_bow_ctr,
+	.resume = dm_bow_resume,
 	.dtr    = dm_bow_dtr,
 	.map    = dm_bow_map,
 	.status = dm_bow_status,
@@ -1279,7 +1328,7 @@ static struct target_type bow_target = {
 	.io_hints = dm_bow_io_hints,
 };
 
-int __init dm_bow_init(void)
+static int __init dm_bow_init(void)
 {
 	int r = dm_register_target(&bow_target);
 
@@ -1288,7 +1337,7 @@ int __init dm_bow_init(void)
 	return r;
 }
 
-void dm_bow_exit(void)
+static void dm_bow_exit(void)
 {
 	dm_unregister_target(&bow_target);
 }

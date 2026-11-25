@@ -6,7 +6,7 @@
 #include <linux/bug.h>
 #include <linux/slab.h>
 #include <linux/time.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 #include <linux/ceph/types.h>
 
@@ -214,33 +214,38 @@ static inline void ceph_encode_timespec64(struct ceph_timespec *tv,
 	tv->tv_sec = cpu_to_le32((u32)ts->tv_sec);
 	tv->tv_nsec = cpu_to_le32((u32)ts->tv_nsec);
 }
-static inline void ceph_decode_timespec(struct timespec *ts,
-					const struct ceph_timespec *tv)
-{
-	ts->tv_sec = (__kernel_time_t)le32_to_cpu(tv->tv_sec);
-	ts->tv_nsec = (long)le32_to_cpu(tv->tv_nsec);
-}
-static inline void ceph_encode_timespec(struct ceph_timespec *tv,
-					const struct timespec *ts)
-{
-	tv->tv_sec = cpu_to_le32((u32)ts->tv_sec);
-	tv->tv_nsec = cpu_to_le32((u32)ts->tv_nsec);
-}
 
 /*
  * sockaddr_storage <-> ceph_sockaddr
  */
-static inline void ceph_encode_addr(struct ceph_entity_addr *a)
+#define CEPH_ENTITY_ADDR_TYPE_NONE	0
+#define CEPH_ENTITY_ADDR_TYPE_LEGACY	__cpu_to_le32(1)
+#define CEPH_ENTITY_ADDR_TYPE_MSGR2	__cpu_to_le32(2)
+#define CEPH_ENTITY_ADDR_TYPE_ANY	__cpu_to_le32(3)
+
+static inline void ceph_encode_banner_addr(struct ceph_entity_addr *a)
 {
 	__be16 ss_family = htons(a->in_addr.ss_family);
 	a->in_addr.ss_family = *(__u16 *)&ss_family;
+
+	/* Banner addresses require TYPE_NONE */
+	a->type = CEPH_ENTITY_ADDR_TYPE_NONE;
 }
-static inline void ceph_decode_addr(struct ceph_entity_addr *a)
+static inline void ceph_decode_banner_addr(struct ceph_entity_addr *a)
 {
 	__be16 ss_family = *(__be16 *)&a->in_addr.ss_family;
 	a->in_addr.ss_family = ntohs(ss_family);
 	WARN_ON(a->in_addr.ss_family == 512);
+	a->type = CEPH_ENTITY_ADDR_TYPE_LEGACY;
 }
+
+extern int ceph_decode_entity_addr(void **p, void *end,
+				   struct ceph_entity_addr *addr);
+int ceph_decode_entity_addrvec(void **p, void *end, bool msgr2,
+			       struct ceph_entity_addr *addr);
+
+int ceph_entity_addr_encoding_len(const struct ceph_entity_addr *addr);
+void ceph_encode_entity_addr(void **p, const struct ceph_entity_addr *addr);
 
 /*
  * encoders

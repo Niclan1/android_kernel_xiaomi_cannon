@@ -1,17 +1,10 @@
-/*
- * Copyright (c) 2020 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// Copyright (c) 2020 MediaTek Inc.
+// Author: Owen Chen <owen.chen@mediatek.com>
 
 #include <linux/clk-provider.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 
 #include "clk-mtk.h"
@@ -21,12 +14,11 @@
 
 #define MT_CLKMGR_MODULE_INIT	0
 
-#define MT_CCF_BRINGUP			1
+#define MT_CCF_BRINGUP		1
 
 #define INV_OFS			-1
 
-/* get spm power status struct to register inside clk_data */
-static struct pwr_status pwr_stat = GATE_PWR_STAT(0x16C,
+static const struct mtk_gate_power_status pwr_stat = GATE_PWR_STAT(0x16C,
 		0x170, INV_OFS, BIT(17), BIT(17));
 
 static const struct mtk_gate_regs venc_cg_regs = {
@@ -46,19 +38,19 @@ static const struct mtk_gate_regs venc_cg_regs = {
 	}
 
 static const struct mtk_gate venc_clks[] = {
-	GATE_VENC(CLK_VENC_SET0_LARB, "venc_set0_larb",
+	GATE_VENC(CLK_VENC_CKE0_LARB, "venc_cke0_larb",
 			"venc_ck"/* parent */, 0),
-	GATE_VENC(CLK_VENC_SET1_VENC, "venc_set1_venc",
+	GATE_VENC(CLK_VENC_CKE1_VENC, "venc_cke1_venc",
 			"venc_ck"/* parent */, 4),
-	GATE_VENC(CLK_VENC_SET2_JPGENC, "jpgenc",
+	GATE_VENC(CLK_VENC_CKE2_JPGENC, "venc_cke2_jpgenc",
 			"venc_ck"/* parent */, 8),
-	GATE_VENC(CLK_VENC_SET5_GALS, "venc_set5_gals",
+	GATE_VENC(CLK_VENC_CKE5_GALS, "venc_cke5_gals",
 			"venc_ck"/* parent */, 28),
 };
 
 static int clk_mt6853_venc_probe(struct platform_device *pdev)
 {
-	struct clk_onecell_data *clk_data;
+	struct clk_hw_onecell_data *clk_data;
 	int r;
 	struct device_node *node = pdev->dev.of_node;
 
@@ -68,10 +60,14 @@ static int clk_mt6853_venc_probe(struct platform_device *pdev)
 
 	clk_data = mtk_alloc_clk_data(CLK_VENC_NR_CLK);
 
-	mtk_clk_register_gates(node, venc_clks, ARRAY_SIZE(venc_clks),
+	r = mtk_clk_register_gates(&pdev->dev, node, venc_clks, ARRAY_SIZE(venc_clks),
 			clk_data);
+	if (r) {
+		mtk_free_clk_data(clk_data);
+		return r;
+	}
 
-	r = of_clk_add_provider(node, of_clk_src_onecell_get, clk_data);
+	r = of_clk_add_hw_provider(node, of_clk_hw_onecell_get, clk_data);
 
 	if (r)
 		pr_err("%s(): could not register clock provider: %d\n",
@@ -110,10 +106,18 @@ static struct platform_driver clk_mt6853_venc_drv = {
 		.of_match_table = of_match_clk_mt6853_venc,
 	},
 };
-static int __init clk_mt6853_venc_platform_init(void)
+
+static int __init clk_mt6853_venc_init(void)
 {
 	return platform_driver_register(&clk_mt6853_venc_drv);
 }
-arch_initcall(clk_mt6853_venc_platform_init);
 
+static void __exit clk_mt6853_venc_exit(void)
+{
+	platform_driver_unregister(&clk_mt6853_venc_drv);
+}
+
+arch_initcall(clk_mt6853_venc_init);
+module_exit(clk_mt6853_venc_exit);
+MODULE_LICENSE("GPL");
 #endif	/* MT_CLKMGR_MODULE_INIT */

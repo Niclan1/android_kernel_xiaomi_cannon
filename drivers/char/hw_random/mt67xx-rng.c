@@ -1,31 +1,30 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
+ * MediaTek MT67xx TRNG, read through the secure monitor.
+ *
+ * On these SoCs the TRNG block is only reachable from the secure world;
+ * TF-A hands out 16 bytes per MTK_SIP_KERNEL_GET_RND call.
+ *
  * Copyright (C) 2019 MediaTek Inc.
  */
 
-#include <linux/module.h>
-#include <linux/platform_device.h>
-#include <linux/hw_random.h>
-#include <linux/of.h>
 #include <linux/arm-smccc.h>
-#include <mt-plat/mtk_secure_api.h>
+#include <linux/hw_random.h>
+#include <linux/module.h>
+#include <linux/of.h>
+#include <linux/platform_device.h>
 
-#define PFX			KBUILD_MODNAME ": "
+#define MTK_SIP_KERNEL_GET_RND	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, \
+						   ARM_SMCCC_SMC_64, \
+						   ARM_SMCCC_OWNER_SIP, 0x26a)
 #define MT67XX_RNG_MAGIC	0x74726e67
-#define SMC_RET_NUM		4
 
-struct mt67xx_rng_priv {
-	struct hwrng rng;
-};
-
-
-static void __rng_sec_read(uint32_t *val)
+static void mt67xx_rng_smc(u32 val[4])
 {
 	struct arm_smccc_res res;
 
-	arm_smccc_smc(MTK_SIP_KERNEL_GET_RND,
-		      MT67XX_RNG_MAGIC, 0, 0, 0, 0, 0, 0, &res);
-
+	arm_smccc_smc(MTK_SIP_KERNEL_GET_RND, MT67XX_RNG_MAGIC,
+		      0, 0, 0, 0, 0, 0, &res);
 	val[0] = res.a0;
 	val[1] = res.a1;
 	val[2] = res.a2;
@@ -34,57 +33,47 @@ static void __rng_sec_read(uint32_t *val)
 
 static int mt67xx_rng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
 {
-	int i, retval = 0;
-	uint32_t val[4] = {0};
-	size_t get_rnd_size = sizeof(u32) * SMC_RET_NUM;
+	u32 val[4];
+	int ret = 0;
 
-	if (!buf) {
-		pr_err("%s, buf is NULL\n", __func__);
-		return -EFAULT;
+	while (max >= sizeof(val)) {
+		mt67xx_rng_smc(val);
+		memcpy(buf, val, sizeof(val));
+		buf += sizeof(val);
+		max -= sizeof(val);
+		ret += sizeof(val);
 	}
+	memzero_explicit(val, sizeof(val));
 
-	while (max >= get_rnd_size) {
-		__rng_sec_read(val);
-
-		for (i = 0; i < SMC_RET_NUM; i++) {
-			*(u32 *)buf = val[i];
-			buf += sizeof(u32);
-		}
-
-		retval += get_rnd_size;
-		max -= get_rnd_size;
-	}
-
-	return retval;
+	return ret;
 }
 
 static int mt67xx_rng_probe(struct platform_device *pdev)
 {
-	int ret;
-	struct mt67xx_rng_priv *priv;
+	struct hwrng *rng;
+	u32 val[4];
 
-	pr_info(PFX "driver registered\n");
-	priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
-	if (!priv)
+	/* firmware without the call answers SMCCC_RET_NOT_SUPPORTED in a0 */
+	mt67xx_rng_smc(val);
+	if (val[0] == (u32)SMCCC_RET_NOT_SUPPORTED && !val[1] && !val[2] && !val[3])
+		return dev_err_probe(&pdev->dev, -ENODEV,
+				     "TRNG SMC not supported by firmware\n");
+	memzero_explicit(val, sizeof(val));
+
+	rng = devm_kzalloc(&pdev->dev, sizeof(*rng), GFP_KERNEL);
+	if (!rng)
 		return -ENOMEM;
 
-	priv->rng.name = KBUILD_MODNAME;
-	priv->rng.read = mt67xx_rng_read;
-	priv->rng.priv = (unsigned long)&pdev->dev;
-	priv->rng.quality = 900;
+	rng->name = KBUILD_MODNAME;
+	rng->read = mt67xx_rng_read;
+	rng->quality = 900;
 
-	ret = devm_hwrng_register(&pdev->dev, &priv->rng);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to register rng device: %d\n", ret);
-		return ret;
-	}
-
-	return 0;
+	return devm_hwrng_register(&pdev->dev, rng);
 }
 
 static const struct of_device_id mt67xx_rng_match[] = {
-	{ .compatible = "mediatek,mt67xx-rng", },
-	{}
+	{ .compatible = "mediatek,mt67xx-rng" },
+	{ }
 };
 MODULE_DEVICE_TABLE(of, mt67xx_rng_match);
 
@@ -92,13 +81,10 @@ static struct platform_driver mt67xx_rng_driver = {
 	.probe = mt67xx_rng_probe,
 	.driver = {
 		.name = KBUILD_MODNAME,
-		.owner = THIS_MODULE,
 		.of_match_table = mt67xx_rng_match,
 	},
 };
-
 module_platform_driver(mt67xx_rng_driver);
 
-MODULE_DESCRIPTION("Mediatek MT67XX Random Number Generator Driver");
-MODULE_AUTHOR("Neal Liu <neal.liu@mediatek.com>");
+MODULE_DESCRIPTION("MediaTek MT67xx secure-monitor TRNG driver");
 MODULE_LICENSE("GPL");

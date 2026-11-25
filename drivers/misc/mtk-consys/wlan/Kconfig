@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTK_CONSYS_WLAN
+	bool "MediaTek MT6853 consys Wi-Fi (gen4m, AXI/SOC2)"
+	depends on MTK_CONSYS_WMT && CFG80211=y && NET
+	select WIRELESS_EXT
+	select WEXT_PRIV
+	default n
+	help
+	  The vendor gen4m WLAN driver for the MT6853 connectivity
+	  combo chip, built in and adapted to mainline cfg80211.
+
+	  It stays dormant until the WMT core is enabled (mtk_consys.hw=1)
+	  and user space writes 1 to /dev/wmtWifi; probing only maps the
+	  CSR window and registers callbacks with WMT. The chip is powered
+	  and the firmware downloaded only on that write.
+
+	  If unsure, say N.

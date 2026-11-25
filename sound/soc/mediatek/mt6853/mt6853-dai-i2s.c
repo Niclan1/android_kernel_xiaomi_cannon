@@ -1527,7 +1527,7 @@ static const struct mtk_afe_i2s_priv mt6853_i2s_priv[DAI_I2S_NUM] = {
 	},
 };
 
-int mt6853_dai_i2s_get_share(struct mtk_base_afe *afe)
+static int mt6853_dai_i2s_get_share(struct mtk_base_afe *afe)
 {
 	struct mt6853_afe_private *afe_priv = afe->platform_priv;
 	const struct device_node *of_node = afe->dev->of_node;
@@ -1547,7 +1547,7 @@ int mt6853_dai_i2s_get_share(struct mtk_base_afe *afe)
 	return 0;
 }
 
-int mt6853_dai_i2s_set_priv(struct mtk_base_afe *afe)
+static int mt6853_dai_i2s_set_priv(struct mtk_base_afe *afe)
 {
 	int i;
 	int ret;

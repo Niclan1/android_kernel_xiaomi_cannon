@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTK_ION_COMPAT
+	bool "Legacy MediaTek /dev/ion ABI on top of DMA-BUF heaps"
+	depends on DMABUF_HEAPS && DMABUF_HEAPS_SYSTEM && ARM64
+	default n
+	help
+	  Provides /dev/ion with the handle based ION ABI of the MediaTek
+	  4.14 kernel (ALLOC/FREE/MAP/SHARE/IMPORT/SYNC/CUSTOM/HEAP_QUERY)
+	  for prebuilt vendor blobs (camera HAL, dpframework). Every legacy
+	  heap that is not secure is served by the "system" DMA-BUF heap
+	  (or "system-uncached" for uncached requests). Secure/protected
+	  heaps are refused. ION_MM_GET_IOVA is served for the M4U
+	  camera/MDP region when the DT has a mediatek,mtk-ion-compat-iova
+	  node.
+
+	  WARNING: Codec2 (libcodec2_vndk, system and vendor) picks its
+	  legacy ION allocator purely because stat("/dev/ion") succeeds and
+	  then crashes in client processes (NULL component store). Before
+	  enabling this, the ROM must either set debug.c2.use_dmabufheaps=1
+	  or label /dev/ion with a type that only the camera HAL may
+	  getattr/open (preferably both).
+
+	  The device is only registered when the kernel is booted with
+
+	    mtk_ion_compat.enable=1
+
+	  If unsure, say N.

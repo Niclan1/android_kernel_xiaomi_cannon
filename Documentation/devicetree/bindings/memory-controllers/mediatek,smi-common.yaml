@@ -1,0 +1,312 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+# Copyright (c) 2020 MediaTek Inc.
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/memory-controllers/mediatek,smi-common.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SMI (Smart Multimedia Interface) Common
+
+maintainers:
+  - Yong Wu <yong.wu@mediatek.com>
+
+description: |
+  The hardware block diagram please check bindings/iommu/mediatek,iommu.yaml
+
+  MediaTek SMI has three generations of HW architecture, here is the list
+  which generation the SoCs use:
+  generation 1: mt2701 and mt7623.
+  generation 2: mt2712, mt6779, mt8167, mt8173, mt8183, mt8186, mt8188, mt8192 and mt8195.
+  generation 3: mt6853.
+
+  There's slight differences between the two SMI, for generation 2, the
+  register which control the iommu port is at each larb's register base. But
+  for generation 1, the register is at smi ao base(smi always on register
+  base). Besides that, the smi async clock should be prepared and enabled for
+  SMI generation 1 to transform the smi clock into emi clock domain, but that is
+  not needed for SMI generation 2.
+
+properties:
+  compatible:
+    oneOf:
+      - enum:
+          - mediatek,mt2701-smi-common
+          - mediatek,mt2712-smi-common
+          - mediatek,mt6779-smi-common
+          - mediatek,mt6795-smi-common
+          - mediatek,mt6853-smi-common
+          - mediatek,mt6893-smi-common
+          - mediatek,mt8167-smi-common
+          - mediatek,mt8173-smi-common
+          - mediatek,mt8183-smi-common
+          - mediatek,mt8186-smi-common
+          - mediatek,mt8188-smi-common-vdo
+          - mediatek,mt8188-smi-common-vpp
+          - mediatek,mt8192-smi-common
+          - mediatek,mt8195-smi-common-vdo
+          - mediatek,mt8195-smi-common-vpp
+          - mediatek,mt8195-smi-sub-common
+          - mediatek,mt8365-smi-common
+
+      - description: for mt7623
+        items:
+          - const: mediatek,mt7623-smi-common
+          - const: mediatek,mt2701-smi-common
+
+      - description: MT6853 main common with generic fallback
+        items:
+          - const: mediatek,mt6853-smi-common
+          - const: mediatek,smi-common
+
+      - description: MT6853 main common with syscon
+        items:
+          - const: mediatek,mt6853-smi-common
+          - const: syscon
+          - const: mediatek,smi-common
+
+      - description: MT6853 sub-common with generic fallback
+        items:
+          - const: mediatek,mt6853-smi-common
+          - const: mediatek,smi-common
+          - const: mediatek,smi-sub-common
+
+      - description: MT6853 sub-common with syscon after generic fallback
+        items:
+          - const: mediatek,mt6853-smi-common
+          - const: mediatek,smi-common
+          - const: syscon
+          - const: mediatek,smi-sub-common
+
+      - description: MT6853 sub-common with syscon before generic fallback
+        items:
+          - const: mediatek,mt6853-smi-common
+          - const: syscon
+          - const: mediatek,smi-common
+          - const: mediatek,smi-sub-common
+
+  reg:
+    maxItems: 1
+
+  power-domains:
+    maxItems: 1
+
+  clocks:
+    description: |
+      apb and smi are mandatory. the async is only for generation 1 smi HW.
+      gals(global async local sync) also is optional, see below.
+    minItems: 2
+    items:
+      - description: apb is Advanced Peripheral Bus clock, It's the clock for
+          setting the register.
+      - description: smi is the clock for transfer data and command.
+      - description: Either asynchronous clock to help transform the smi clock
+          into the emi clock domain on Gen1 h/w, or the path0 clock of gals.
+      - description: gals1 is the path1 clock of gals.
+
+  clock-names:
+    minItems: 2
+    maxItems: 4
+
+  mediatek,smi:
+    $ref: /schemas/types.yaml#/definitions/phandle-array
+    minItems: 1
+    maxItems: 2
+    description: |
+      A phandle to an SMI common node. For MT6853, common-id 0 is the root and
+      its mediatek,smi phandles point to dependent children. Nodes carrying the
+      mediatek,smi-sub-common compatible use this property to point upstream
+      to their parent; the explicit compatible distinguishes that direction.
+      Parent chains may contain multiple sub-common nodes and terminate at the
+      unmarked root common. The ACK IOMMU integration must follow marked parent
+      links with a bounded traversal and reject cycles or a marked node without
+      a parent when that node is reached from a LARB. The root's two raw child
+      phandles are represented as one phandle-array entry because they have no
+      specifier cells; the ACK driver enforces the exact count.
+
+  mediatek,common-id:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 0
+    maximum: 7
+    description: |
+      Hardware common ID, required for MT6853 SMI common nodes. ID 0 is the
+      unmarked root common; IDs 1 through 7 are sub-commons and must include
+      the mediatek,smi-sub-common compatible. This marker identifies parent
+      links for the ACK IOMMU parser without confusing root-to-child links.
+
+required:
+  - compatible
+  - reg
+  - power-domains
+  - clocks
+  - clock-names
+
+allOf:
+  - if:  # only for gen1 HW
+      properties:
+        compatible:
+          contains:
+            enum:
+              - mediatek,mt2701-smi-common
+    then:
+      properties:
+        clocks:
+          minItems: 3
+          maxItems: 3
+        clock-names:
+          items:
+            - const: apb
+            - const: smi
+            - const: async
+
+  - if:  # only for MT8195 sub-common
+      properties:
+        compatible:
+          contains:
+            const: mediatek,mt8195-smi-sub-common
+    then:
+      required:
+        - mediatek,smi
+      properties:
+        clocks:
+          minItems: 3
+          maxItems: 3
+        clock-names:
+          items:
+            - const: apb
+            - const: smi
+            - const: gals0
+
+    else:
+      if:
+        properties:
+          compatible:
+            contains:
+              const: mediatek,mt6853-smi-common
+      then: {}
+      else:
+        properties:
+          mediatek,smi: false
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: mediatek,mt6853-smi-common
+    then:
+      required:
+        - mediatek,common-id
+      properties:
+        clocks:
+          minItems: 4
+          maxItems: 4
+        clock-names:
+          items:
+            - const: apb
+            - const: smi
+            - const: gals0
+            - const: gals1
+      allOf:
+        - if:
+            properties:
+              mediatek,common-id:
+                const: 0
+          then:
+            required:
+              - mediatek,smi
+            properties:
+              mediatek,smi:
+                minItems: 1
+                maxItems: 2
+              compatible:
+                not:
+                  contains:
+                    const: mediatek,smi-sub-common
+        - if:
+            properties:
+              mediatek,common-id:
+                enum: [1, 2, 3, 4, 5, 6, 7]
+          then:
+            properties:
+              compatible:
+                allOf:
+                  - contains:
+                      const: mediatek,smi-common
+                  - contains:
+                      const: mediatek,smi-sub-common
+        - if:
+            properties:
+              mediatek,common-id:
+                enum: [3, 4, 5, 6, 7]
+          then:
+            required:
+              - mediatek,smi
+            properties:
+              mediatek,smi:
+                maxItems: 1
+        - if:
+            properties:
+              mediatek,common-id:
+                enum: [1, 2]
+          then:
+            properties:
+              mediatek,smi: false
+
+  - if:  # HW that have gals
+      properties:
+        compatible:
+          enum:
+            - mediatek,mt6779-smi-common
+            - mediatek,mt8183-smi-common
+            - mediatek,mt8186-smi-common
+            - mediatek,mt8192-smi-common
+            - mediatek,mt8195-smi-common-vdo
+            - mediatek,mt8195-smi-common-vpp
+            - mediatek,mt8365-smi-common
+            - mediatek,mt6853-smi-common
+
+    then:
+      properties:
+        clocks:
+          minItems: 4
+          maxItems: 4
+        clock-names:
+          items:
+            - const: apb
+            - const: smi
+            - const: gals0
+            - const: gals1
+
+  - if:  # for gen2 HW that don't have gals
+      properties:
+        compatible:
+          enum:
+            - mediatek,mt2712-smi-common
+            - mediatek,mt6795-smi-common
+            - mediatek,mt8167-smi-common
+            - mediatek,mt8173-smi-common
+
+    then:
+      properties:
+        clocks:
+          minItems: 2
+          maxItems: 2
+        clock-names:
+          items:
+            - const: apb
+            - const: smi
+
+additionalProperties: false
+
+examples:
+  - |+
+    #include <dt-bindings/clock/mt8173-clk.h>
+    #include <dt-bindings/power/mt8173-power.h>
+
+    smi_common: smi@14022000 {
+            compatible = "mediatek,mt8173-smi-common";
+            reg = <0x14022000 0x1000>;
+            power-domains = <&scpsys MT8173_POWER_DOMAIN_MM>;
+            clocks = <&mmsys CLK_MM_SMI_COMMON>,
+                     <&mmsys CLK_MM_SMI_COMMON>;
+            clock-names = "apb", "smi";
+    };

@@ -1,0 +1,49 @@
+/dts-v1/;
+/plugin/;
+
+&i2c7 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	lm36273: backlight@11 {
+		compatible = "mediatek,i2c_lcd_bias", "ti,lm36273";
+		reg = <0x11>;
+
+		panel_bias: bias {
+			regulator-name = "panel-bias";
+			regulator-min-microvolt = <5500000>;
+			regulator-max-microvolt = <5500000>;
+		};
+	};
+};
+
+&dsi0 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	panel@0 {
+		compatible = "j22_43_03_0b,vdo";
+		reg = <0>;
+		reset-gpios = <&pio 86 0>;
+		bias-gpios = <&pio 137 0>, <&pio 138 0>;
+		bias-supply = <&panel_bias>;
+		backlight = <&lm36273>;
+		status = "okay";
+
+		port {
+			cannong_panel_in: endpoint {
+				remote-endpoint = <&cannong_dsi_out>;
+			};
+		};
+	};
+
+	ports {
+		port {
+			cannong_dsi_out: endpoint {
+				remote-endpoint = <&cannong_panel_in>;
+			};
+		};
+	};
+};

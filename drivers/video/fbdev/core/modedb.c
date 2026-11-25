@@ -11,6 +11,7 @@
  *  more details.
  */
 
+#include <linux/export.h>
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/fb.h>
@@ -576,45 +577,47 @@ static int fb_try_mode(struct fb_var_screeninfo *var, struct fb_info *info,
 }
 
 /**
- *     fb_find_mode - finds a valid video mode
- *     @var: frame buffer user defined part of display
- *     @info: frame buffer info structure
- *     @mode_option: string video mode to find
- *     @db: video mode database
- *     @dbsize: size of @db
- *     @default_mode: default video mode to fall back to
- *     @default_bpp: default color depth in bits per pixel
+ * fb_find_mode - finds a valid video mode
+ * @var: frame buffer user defined part of display
+ * @info: frame buffer info structure
+ * @mode_option: string video mode to find
+ * @db: video mode database
+ * @dbsize: size of @db
+ * @default_mode: default video mode to fall back to
+ * @default_bpp: default color depth in bits per pixel
  *
- *     Finds a suitable video mode, starting with the specified mode
- *     in @mode_option with fallback to @default_mode.  If
- *     @default_mode fails, all modes in the video mode database will
- *     be tried.
+ * Finds a suitable video mode, starting with the specified mode
+ * in @mode_option with fallback to @default_mode.  If
+ * @default_mode fails, all modes in the video mode database will
+ * be tried.
  *
- *     Valid mode specifiers for @mode_option:
+ * Valid mode specifiers for @mode_option::
  *
- *     <xres>x<yres>[M][R][-<bpp>][@<refresh>][i][p][m] or
+ *     <xres>x<yres>[M][R][-<bpp>][@<refresh>][i][p][m]
+ *
+ * or ::
+ *
  *     <name>[-<bpp>][@<refresh>]
  *
- *     with <xres>, <yres>, <bpp> and <refresh> decimal numbers and
- *     <name> a string.
+ * with <xres>, <yres>, <bpp> and <refresh> decimal numbers and
+ * <name> a string.
  *
- *      If 'M' is present after yres (and before refresh/bpp if present),
- *      the function will compute the timings using VESA(tm) Coordinated
- *      Video Timings (CVT).  If 'R' is present after 'M', will compute with
- *      reduced blanking (for flatpanels).  If 'i' or 'p' are present, compute
- *      interlaced or progressive mode.  If 'm' is present, add margins equal
- *      to 1.8% of xres rounded down to 8 pixels, and 1.8% of yres. The chars
- *      'i', 'p' and 'm' must be after 'M' and 'R'. Example:
+ * If 'M' is present after yres (and before refresh/bpp if present),
+ * the function will compute the timings using VESA(tm) Coordinated
+ * Video Timings (CVT).  If 'R' is present after 'M', will compute with
+ * reduced blanking (for flatpanels).  If 'i' or 'p' are present, compute
+ * interlaced or progressive mode.  If 'm' is present, add margins equal
+ * to 1.8% of xres rounded down to 8 pixels, and 1.8% of yres. The char
+ * 'i', 'p' and 'm' must be after 'M' and 'R'. Example::
  *
- *      1024x768MR-8@60m - Reduced blank with margins at 60Hz.
+ *     1024x768MR-8@60m - Reduced blank with margins at 60Hz.
  *
- *     NOTE: The passed struct @var is _not_ cleared!  This allows you
- *     to supply values for e.g. the grayscale and accel_flags fields.
+ * NOTE: The passed struct @var is _not_ cleared!  This allows you
+ * to supply values for e.g. the grayscale and accel_flags fields.
  *
- *     Returns zero for failure, 1 if using specified @mode_option,
- *     2 if using specified @mode_option with an ignored refresh rate,
- *     3 if default mode is used, 4 if fall back to any valid mode.
- *
+ * Returns zero for failure, 1 if using specified @mode_option,
+ * 2 if using specified @mode_option with an ignored refresh rate,
+ * 3 if default mode is used, 4 if fall back to any valid mode.
  */
 
 int fb_find_mode(struct fb_var_screeninfo *var,
@@ -623,6 +626,7 @@ int fb_find_mode(struct fb_var_screeninfo *var,
 		 const struct fb_videomode *default_mode,
 		 unsigned int default_bpp)
 {
+	char *mode_option_buf = NULL;
 	int i;
 
 	/* Set up defaults */
@@ -638,8 +642,10 @@ int fb_find_mode(struct fb_var_screeninfo *var,
 		default_bpp = 8;
 
 	/* Did the user specify a video mode? */
-	if (!mode_option)
-		mode_option = fb_mode_option;
+	if (!mode_option) {
+		fb_get_options(NULL, &mode_option_buf);
+		mode_option = mode_option_buf;
+	}
 	if (mode_option) {
 		const char *name = mode_option;
 		unsigned int namelen = strlen(name);
@@ -718,6 +724,7 @@ int fb_find_mode(struct fb_var_screeninfo *var,
 			res_specified = 1;
 		}
 done:
+		kfree(mode_option_buf);
 		if (cvt) {
 			struct fb_videomode cvt_mode;
 			int ret;
@@ -957,15 +964,12 @@ int fb_mode_is_equal(const struct fb_videomode *mode1,
 const struct fb_videomode *fb_find_best_mode(const struct fb_var_screeninfo *var,
 					     struct list_head *head)
 {
-	struct list_head *pos;
 	struct fb_modelist *modelist;
 	struct fb_videomode *mode, *best = NULL;
 	u32 diff = -1;
 
-	list_for_each(pos, head) {
+	list_for_each_entry(modelist, head, list) {
 		u32 d;
-
-		modelist = list_entry(pos, struct fb_modelist, list);
 		mode = &modelist->mode;
 
 		if (mode->xres >= var->xres && mode->yres >= var->yres) {
@@ -995,15 +999,12 @@ const struct fb_videomode *fb_find_best_mode(const struct fb_var_screeninfo *var
 const struct fb_videomode *fb_find_nearest_mode(const struct fb_videomode *mode,
 					        struct list_head *head)
 {
-	struct list_head *pos;
 	struct fb_modelist *modelist;
 	struct fb_videomode *cmode, *best = NULL;
 	u32 diff = -1, diff_refresh = -1;
 
-	list_for_each(pos, head) {
+	list_for_each_entry(modelist, head, list) {
 		u32 d;
-
-		modelist = list_entry(pos, struct fb_modelist, list);
 		cmode = &modelist->mode;
 
 		d = abs(cmode->xres - mode->xres) +
@@ -1035,13 +1036,11 @@ const struct fb_videomode *fb_find_nearest_mode(const struct fb_videomode *mode,
 const struct fb_videomode *fb_match_mode(const struct fb_var_screeninfo *var,
 					 struct list_head *head)
 {
-	struct list_head *pos;
 	struct fb_modelist *modelist;
 	struct fb_videomode *m, mode;
 
 	fb_var_to_videomode(&mode, var);
-	list_for_each(pos, head) {
-		modelist = list_entry(pos, struct fb_modelist, list);
+	list_for_each_entry(modelist, head, list) {
 		m = &modelist->mode;
 		if (fb_mode_is_equal(m, &mode))
 			return m;
@@ -1059,13 +1058,11 @@ const struct fb_videomode *fb_match_mode(const struct fb_var_screeninfo *var,
  */
 int fb_add_videomode(const struct fb_videomode *mode, struct list_head *head)
 {
-	struct list_head *pos;
 	struct fb_modelist *modelist;
 	struct fb_videomode *m;
 	int found = 0;
 
-	list_for_each(pos, head) {
-		modelist = list_entry(pos, struct fb_modelist, list);
+	list_for_each_entry(modelist, head, list) {
 		m = &modelist->mode;
 		if (fb_mode_is_equal(m, mode)) {
 			found = 1;
@@ -1146,7 +1143,6 @@ void fb_videomode_to_modelist(const struct fb_videomode *modedb, int num,
 const struct fb_videomode *fb_find_best_display(const struct fb_monspecs *specs,
 					        struct list_head *head)
 {
-	struct list_head *pos;
 	struct fb_modelist *modelist;
 	const struct fb_videomode *m, *m1 = NULL, *md = NULL, *best = NULL;
 	int first = 0;
@@ -1155,8 +1151,7 @@ const struct fb_videomode *fb_find_best_display(const struct fb_monspecs *specs,
 		goto finished;
 
 	/* get the first detailed mode and the very first mode */
-	list_for_each(pos, head) {
-		modelist = list_entry(pos, struct fb_modelist, list);
+	list_for_each_entry(modelist, head, list) {
 		m = &modelist->mode;
 
 		if (!first) {

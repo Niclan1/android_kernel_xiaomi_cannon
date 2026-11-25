@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * MD1 (cellular modem) hookups for the MT6853 CCCI driver in
+ * drivers/misc/mtk-ccci (CONFIG_MTK_CCCI, mtk_ccci.hw=1).
+ * Included from mt6853.dts; nothing here is used while mtk_ccci.hw=0.
+ *
+ * The modem image and shared memory regions, and the
+ * "ccci,modem_info_v2" boot arguments, are added to /chosen, /mddriver
+ * and /reserved-memory by LK at boot and are therefore not listed here.
+ */
+
+#include <dt-bindings/clock/mt6853-clk.h>
+#include <dt-bindings/power/mt6853-power.h>
+
+&mddriver {
+	/*
+	 * Attaching the MD domain to mddriver itself would power MD1 on at
+	 * probe. The driver attaches it through the md1-power child and only
+	 * powers it when the modem is started.
+	 */
+	/delete-property/ power-domains;
+
+	/*
+	 * The stock infra-dpmaif-clk is the IFRAO DPMAIF_MAIN gate (0xc0/
+	 * 0xc4/0xc8 bit 26), which the 6.18 clock driver does not provide;
+	 * use its parent mux here, the driver handles the leaf gate.
+	 */
+	clocks = <&topckgen_clk CLK_TOP_DPMAIF_MAIN_SEL>,
+		 <&infracfg_ao_clk CLK_IFRAO_CLDMA_BCLK>,
+		 <&infracfg_ao_clk CLK_IFRAO_CCIF_AP>,
+		 <&infracfg_ao_clk CLK_IFRAO_CCIF_MD>,
+		 <&infracfg_ao_clk CLK_IFRAO_CCIF1_AP>,
+		 <&infracfg_ao_clk CLK_IFRAO_CCIF1_MD>,
+		 <&infracfg_ao_clk CLK_IFRAO_CCIF2_AP>,
+		 <&infracfg_ao_clk CLK_IFRAO_CCIF2_MD>,
+		 <&infracfg_ao_clk CLK_IFRAO_CCIF4_MD>,
+		 <&infracfg_ao_clk CLK_IFRAO_CCIF5_MD>;
+	clock-names = "infra-dpmaif-clk", "infra-dpmaif-blk-clk",
+		      "infra-ccif-ap", "infra-ccif-md",
+		      "infra-ccif1-ap", "infra-ccif1-md",
+		      "infra-ccif2-ap", "infra-ccif2-md",
+		      "infra-ccif4-md", "infra-ccif5-md";
+
+	md1-power {
+		power-domains = <&scpsys MT6853_POWER_DOMAIN_MD>;
+	};
+};
+
+/ {
+	md_attr_node {
+		compatible = "mediatek,md_attr_node";
+		mediatek,md_product_name_model_id = <0x0f0f0f0f>;
+		mediatek,md_drdi_rf_set_idx = <0x0e>;
+	};
+};
+
+/*
+ * MODEM: the MD queries the "md-channel" AP AUXADC channel over CCCI RPC
+ * (IPC_RPC_GET_ADC_*). Mainline mt6577_auxadc has no mt6768 entry; the
+ * mt6765 data (calibrated samples, no global-idle check) is what stock
+ * used for mt6768.
+ */
+&auxadc {
+	compatible = "mediatek,mt6768-auxadc", "mediatek,mt6765-auxadc";
+};

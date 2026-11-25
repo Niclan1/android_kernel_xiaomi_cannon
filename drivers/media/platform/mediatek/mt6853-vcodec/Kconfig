@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config VIDEO_MEDIATEK_MT6853_VCU_ENC
+	bool "MediaTek MT6853 vendor VCU encoder"
+	depends on V4L_MEM2MEM_DRIVERS && VIDEO_DEV
+	depends on ARCH_MEDIATEK && MTK_IOMMU && MTK_SMI
+	depends on MTK_VCU
+	depends on !VIDEO_MEDIATEK_VCODEC
+	select VIDEOBUF2_DMA_CONTIG
+	select V4L2_MEM2MEM_DEV
+	help
+	  MT6853 V4L2 memory-to-memory encoder using the Android vendor vpud
+	  daemon through /dev/vcu. Provides the vendor-private controls and
+	  VCU IPI protocol needed by c2.mtk AVC, HEVC and HEIF encoders.
+	  Requires mtk_vcu.enable=1 and a matching vendor vpud installation.

@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTK_CAM_PORT
+	bool "MediaTek MT6853 legacy camera stack (imgsensor/seninf) port"
+	depends on OF && I2C && REGULATOR && PINCTRL && PM && PROC_FS
+	depends on ARM64 && COMMON_CLK && (ARCH_MEDIATEK || COMPILE_TEST)
+	depends on DMA_SHARED_BUFFER && PM_GENERIC_DOMAINS
+	select REGMAP_I2C
+	default n
+	help
+	  Port of the 4.14 MediaTek legacy camera kernel interface used by
+	  the stock MT6853 camera HAL (camerahalserver, libcam.halsensor):
+
+	    /dev/kd_camera_hw  image sensor power, I2C and feature control
+	    /dev/seninf        sensor interface clocks, MCLK and register map
+
+	  plus the sensor drivers of the Redmi Note 9T (s5kgm1st, s5k3l6,
+	  ov02b10, ov8856, hi259) and the FAN53870/PM8008 camera LDO PMICs on
+	  i2c9, and the read-only camera EEPROM nodes /dev/camera_eepromN
+	  (cam_cal v2) and the DW9800W main lens actuator /dev/MAINAF.
+
+	  It also contains the ISP P1 driver /dev/camera-isp (camsys raw
+	  A/B and camsv2-7), powered through the cam power domains and the
+	  M4U (mtk_iommu) larbs 13/16/17. It needs a second switch:
+
+	    mtk_cam.hw=1 mtk_cam.isp=1
+
+	  The ISP P2 path used for preview and capture has its own switches,
+	  each of them off by default:
+
+	    mtk_cam.dip=1    /dev/camera-dip (DIP, MFB/MSS/MSF), imgsys
+	                     power through the larb9/larb11 iommus
+	    mtk_cam.mdp=1    /dev/mtk_mdp and /dev/mtk_mdp_limit: the 4.14
+	                     CMDQ "meta" ABI of libdpframework, executed on
+	                     the mainline GCE mailbox (needs MTK_CMDQ=y)
+	    mtk_cam.flash=1  /dev/flashlight: the 4.14 flashlight-core ABI on
+	                     top of the MT6360 LED-class flash LED (needs
+	                     LEDS_CLASS_FLASH=y and LEDS_MT6360)
+
+	  CCU is not part of this port; the HAL must be told not to use it
+	  (vendor.debug.ccu_mgr_ccu.enable=0).
+
+	  Nothing is registered and no camera hardware is touched unless the
+	  kernel is booted with
+
+	    mtk_cam.hw=1
+
+	  The device tree needs arch/arm64/boot/dts/mediatek/
+	  mt6853-camera.dtsi.
+
+	  If unsure, say N.

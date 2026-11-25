@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * LPDDR2-NVM MTD driver. This module provides read, write, erase, lock/unlock
  * support for LPDDR2-NVM PCM memories
@@ -7,16 +8,6 @@
  * Vincenzo Aliberti <vincenzo.aliberti@gmail.com>
  * Domenico Manna <domenico.manna@gmail.com>
  * Many thanks to Andrea Vigilante for initial enabling
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
  */
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": %s: " fmt, __func__
@@ -380,14 +371,8 @@ out:
  */
 static int lpddr2_nvm_erase(struct mtd_info *mtd, struct erase_info *instr)
 {
-	int ret = lpddr2_nvm_do_block_op(mtd, instr->addr, instr->len,
-		LPDDR2_NVM_ERASE);
-	if (!ret) {
-		instr->state = MTD_ERASE_DONE;
-		mtd_erase_callback(instr);
-	}
-
-	return ret;
+	return lpddr2_nvm_do_block_op(mtd, instr->addr, instr->len,
+				      LPDDR2_NVM_ERASE);
 }
 
 /*
@@ -427,7 +412,6 @@ static int lpddr2_nvm_probe(struct platform_device *pdev)
 	struct map_info *map;
 	struct mtd_info *mtd;
 	struct resource *add_range;
-	struct resource *control_regs;
 	struct pcm_int_data *pcm_data;
 
 	/* Allocate memory control_regs data structures */
@@ -467,8 +451,7 @@ static int lpddr2_nvm_probe(struct platform_device *pdev)
 
 	simple_map_init(map);	/* fill with default methods */
 
-	control_regs = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	pcm_data->ctl_regs = devm_ioremap_resource(&pdev->dev, control_regs);
+	pcm_data->ctl_regs = devm_platform_ioremap_resource(pdev, 1);
 	if (IS_ERR(pcm_data->ctl_regs))
 		return PTR_ERR(pcm_data->ctl_regs);
 
@@ -487,15 +470,15 @@ static int lpddr2_nvm_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 	/* Parse partitions and register the MTD device */
-	return mtd_device_parse_register(mtd, NULL, NULL, NULL, 0);
+	return mtd_device_register(mtd, NULL, 0);
 }
 
 /*
  * lpddr2_nvm driver remove method
  */
-static int lpddr2_nvm_remove(struct platform_device *pdev)
+static void lpddr2_nvm_remove(struct platform_device *pdev)
 {
-	return mtd_device_unregister(dev_get_drvdata(&pdev->dev));
+	WARN_ON(mtd_device_unregister(dev_get_drvdata(&pdev->dev)));
 }
 
 /* Initialize platform_driver data structure for lpddr2_nvm */

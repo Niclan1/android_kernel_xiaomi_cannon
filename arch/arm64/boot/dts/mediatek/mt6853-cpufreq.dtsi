@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * CPU frequency scaling through the MCUPM hybrid DVFS firmware.
+ *
+ * Meant to be included at the end of mt6853.dts. The vendor dvfsp, mt_cpufreq
+ * and mcupm nodes overlap the ranges below but nothing binds to them, and the
+ * driver maps its ranges without claiming them, so they are left alone.
+ */
+
+/ {
+	cpufreq_mcupm: cpufreq-mcupm@11bc00 {
+		compatible = "mediatek,mt6853-mcupm-cpufreq";
+		reg = <0 0x0011bc00 0 0x1400>,
+		      <0 0x0c55fb00 0 0x140>,
+		      <0 0x0c562000 0 0x8>,
+		      <0 0x0c560074 0 0x8>;
+		reg-names = "csram", "slots", "send", "recv";
+		#performance-domain-cells = <1>;
+		vproc-ll-supply = <&mt_pmic_vproc2_buck_reg>;
+		vsram-ll-supply = <&mt_pmic_vsram_proc2_ldo_reg>;
+		vproc-l-supply = <&mt_pmic_vgpu11_buck_reg>;
+		vsram-l-supply = <&mt_pmic_vsram_proc1_ldo_reg>;
+	};
+};
+
+&cpu0 {
+	performance-domains = <&cpufreq_mcupm 0>;
+	dynamic-power-coefficient = <70>;
+	#cooling-cells = <2>;
+};
+
+&cpu1 {
+	performance-domains = <&cpufreq_mcupm 0>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu2 {
+	performance-domains = <&cpufreq_mcupm 0>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu3 {
+	performance-domains = <&cpufreq_mcupm 0>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu4 {
+	performance-domains = <&cpufreq_mcupm 0>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu5 {
+	performance-domains = <&cpufreq_mcupm 0>;
+	dynamic-power-coefficient = <70>;
+};
+
+&cpu6 {
+	performance-domains = <&cpufreq_mcupm 1>;
+	dynamic-power-coefficient = <260>;
+	#cooling-cells = <2>;
+};
+
+&cpu7 {
+	performance-domains = <&cpufreq_mcupm 1>;
+	dynamic-power-coefficient = <260>;
+};

@@ -21,39 +21,6 @@ int mt6853_set_local_afe(struct mtk_base_afe *afe)
 	return 0;
 }
 
-enum {
-	MTK_AFE_RATE_8K = 0,
-	MTK_AFE_RATE_11K = 1,
-	MTK_AFE_RATE_12K = 2,
-	MTK_AFE_RATE_384K = 3,
-	MTK_AFE_RATE_16K = 4,
-	MTK_AFE_RATE_22K = 5,
-	MTK_AFE_RATE_24K = 6,
-	MTK_AFE_RATE_352K = 7,
-	MTK_AFE_RATE_32K = 8,
-	MTK_AFE_RATE_44K = 9,
-	MTK_AFE_RATE_48K = 10,
-	MTK_AFE_RATE_88K = 11,
-	MTK_AFE_RATE_96K = 12,
-	MTK_AFE_RATE_176K = 13,
-	MTK_AFE_RATE_192K = 14,
-	MTK_AFE_RATE_260K = 15,
-};
-
-enum {
-	MTK_AFE_DAI_MEMIF_RATE_8K = 0,
-	MTK_AFE_DAI_MEMIF_RATE_16K = 1,
-	MTK_AFE_DAI_MEMIF_RATE_32K = 2,
-	MTK_AFE_DAI_MEMIF_RATE_48K = 3,
-};
-
-enum {
-	MTK_AFE_PCM_RATE_8K = 0,
-	MTK_AFE_PCM_RATE_16K = 1,
-	MTK_AFE_PCM_RATE_32K = 2,
-	MTK_AFE_PCM_RATE_48K = 3,
-};
-
 unsigned int mt6853_general_rate_transform(struct device *dev,
 					   unsigned int rate)
 {
@@ -267,7 +234,7 @@ int mtk_audio_request_sram(dma_addr_t *phys_addr,
 
 	ret = mtk_audio_sram_allocate(local_afe->sram, phys_addr, virt_addr,
 				      length, user,
-				      SNDRV_PCM_FORMAT_S16_LE, true);
+				      SNDRV_PCM_FORMAT_S16_LE, true, false);
 	if (ret) {
 		dev_warn(local_afe->dev, "%s(), allocate sram fail, ret %d\n",
 			 __func__, ret);

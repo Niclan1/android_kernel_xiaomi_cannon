@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 #
 # Near Field Communication (NFC) devices
 #
@@ -27,16 +28,6 @@ config NFC_MEI_PHY
 
 	  If unsure, say N.
 
-config NFC_PN553_DEVICES
-	bool "Nxp pn553 NCI protocol driver (I2C) devices"
-	default y
-	help
-	  You'll have to say Y if your computer contains an I2C device that
-	  you want to use under Linux.
-
-	  You can say N here if you don't have any SPI connected to your computer.
-
-
 config NFC_SIM
 	tristate "NFC hardware simulator driver"
 	depends on NFC_DIGITAL
@@ -55,6 +46,17 @@ config NFC_PORT100
 	help
 	  This adds support for Sony Port-100 chip based USB devices such as the
 	  RC-S380 dongle.
+
+	  If unsure, say N.
+
+config NFC_VIRTUAL_NCI
+	tristate "NCI device simulator driver"
+	depends on NFC_NCI
+	help
+	  NCI virtual device simulates a NCI device to the user.
+	  It can be used to validate the NCI module and applications.
+	  This driver supports communication between the virtual NCI device and
+	  module.
 
 	  If unsure, say N.
 

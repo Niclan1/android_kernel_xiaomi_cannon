@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config MTK_VCU
+	bool "MediaTek VCU bridge for the vendor video daemon"
+	depends on ARCH_MEDIATEK || COMPILE_TEST
+	depends on MTK_CMDQ=y
+	select VIDEOBUF2_CORE
+	help
+	  Provides /dev/vcu, the kernel side of the MediaTek vendor video
+	  stack (vpud). It relays IPI messages between video codec drivers
+	  and vpud, allocates DMA working buffers for the daemon, maps the
+	  codec register windows described by the "mediatek-vcu" DT node
+	  and executes the daemon's GCE command lists through the mtk-cmdq
+	  mailbox.
+
+	  The driver stays inert unless the kernel is booted with
+	  mtk_vcu.enable=1.
+
+	  If unsure, say N.

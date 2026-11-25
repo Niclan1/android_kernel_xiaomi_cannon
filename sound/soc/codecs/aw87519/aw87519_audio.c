@@ -134,7 +134,7 @@ static int aw87519_i2c_write_bits(struct aw87519 *aw87519,
 /****************************************************************************
 * aw87519 hardware control
 ***************************************************************************/
-unsigned int aw87519_hw_on(struct aw87519 *aw87519)
+static unsigned int aw87519_hw_on(struct aw87519 *aw87519)
 {
 	pr_info("%s enter\n", __func__);
 
@@ -152,7 +152,7 @@ unsigned int aw87519_hw_on(struct aw87519 *aw87519)
 	return 0;
 }
 
-unsigned int aw87519_hw_off(struct aw87519 *aw87519)
+static unsigned int aw87519_hw_off(struct aw87519 *aw87519)
 {
 	pr_info("%s enter\n", __func__);
 
@@ -177,7 +177,7 @@ static void aw87519_AGC_config(void)
 				       AW87519_BIT_PAGC3OPR_AGC3_DISABLE);
 		aw87519_i2c_write_bits(aw87519, AW87519_REG_PAGC2OPR,
 				       AW87519_BIT_PAGC2OPR_AGC2_PO_MASK,
-				       AW87519_BIT_PAGC2OPR_AGC2_DISABLE); 
+				       AW87519_BIT_PAGC2OPR_AGC2_DISABLE);
 		aw87519_i2c_write_bits(aw87519, AW87519_REG_PAGC1PR,
 				       AW87519_BIT_PAGC1PR_PD_AGC1_MASK,
 				       AW87519_BIT_PAGC1PR_AGC1_DISABLE);
@@ -246,6 +246,7 @@ unsigned char aw87519_audio_kspk(void)
 	aw87519_AGC_config();
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw87519_audio_kspk);
 
 unsigned char aw87519_audio_hvload(void)
 {
@@ -288,17 +289,18 @@ unsigned char aw87519_audio_off(void)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(aw87519_audio_off);
 
-unsigned char aw87519_audio_AGC_bypass(void)
+static unsigned char aw87519_audio_AGC_bypass(void)
 {
 	if (aw87519 == NULL)
 		return 2;
-	
+
 	if (!aw87519->hwen_flag)
 		aw87519_hw_on(aw87519);
 
 	aw87519->AGC_bypass_flag = true;
-	
+
 	aw87519_AGC_config();
 	return 0;
 }
@@ -353,7 +355,7 @@ static int aw87519_hvload_update(struct aw87519 *aw87519)
 {
 	pr_info("%s enter\n", __func__);
 	return request_firmware_nowait(THIS_MODULE,
-				       FW_ACTION_HOTPLUG,
+				       true,
 				       aw87519_hvload_name,
 				       &aw87519->i2c_client->dev,
 				       GFP_KERNEL,
@@ -406,7 +408,7 @@ static int aw87519_drcv_update(struct aw87519 *aw87519)
 {
 	pr_info("%s enter\n", __func__);
 	return request_firmware_nowait(THIS_MODULE,
-				       FW_ACTION_HOTPLUG,
+				       true,
 				       aw87519_drcv_name,
 				       &aw87519->i2c_client->dev,
 				       GFP_KERNEL,
@@ -460,7 +462,7 @@ static int aw87519_kspk_update(struct aw87519 *aw87519)
 	pr_info("%s enter\n", __func__);
 
 	return request_firmware_nowait(THIS_MODULE,
-				       FW_ACTION_HOTPLUG,
+				       true,
 				       aw87519_kspk_name,
 				       &aw87519->i2c_client->dev,
 				       GFP_KERNEL,
@@ -687,7 +689,7 @@ static int aw87519_parse_dt(struct device *dev, struct device_node *np)
 	return 0;
 }
 
-int aw87519_hw_reset(struct aw87519 *aw87519)
+static int aw87519_hw_reset(struct aw87519 *aw87519)
 {
 	pr_info("%s enter\n", __func__);
 
@@ -707,7 +709,7 @@ int aw87519_hw_reset(struct aw87519 *aw87519)
 /*****************************************************
  * check chip id
  *****************************************************/
-int aw87519_read_chipid(struct aw87519 *aw87519)
+static int aw87519_read_chipid(struct aw87519 *aw87519)
 {
 	unsigned int cnt = 0;
 	int ret = -1;
@@ -732,8 +734,7 @@ int aw87519_read_chipid(struct aw87519 *aw87519)
 /*******************************************************************************
  * aw87519 i2c driver
  ******************************************************************************/
-static int aw87519_i2c_probe(struct i2c_client *client,
-			     const struct i2c_device_id *id)
+static int aw87519_i2c_probe(struct i2c_client *client)
 {
 	struct device_node *np = client->dev.of_node;
 	int ret = -1;
@@ -815,7 +816,6 @@ static int aw87519_i2c_probe(struct i2c_client *client,
 	return 0;
 
  exit_i2c_check_id_failed:
-	devm_gpio_free(&client->dev, aw87519->reset_gpio);
  exit_gpio_request_failed:
  exit_gpio_get_failed:
 	devm_kfree(&client->dev, aw87519);
@@ -825,14 +825,9 @@ static int aw87519_i2c_probe(struct i2c_client *client,
 	return ret;
 }
 
-static int aw87519_i2c_remove(struct i2c_client *client)
+static void aw87519_i2c_remove(struct i2c_client *client)
 {
-	struct aw87519 *aw87519 = i2c_get_clientdata(client);
-
-	if (gpio_is_valid(aw87519->reset_gpio))
-		devm_gpio_free(&client->dev, aw87519->reset_gpio);
-
-	return 0;
+	sysfs_remove_group(&client->dev.kobj, &aw87519_attribute_group);
 }
 
 static const struct i2c_device_id aw87519_i2c_id[] = {

@@ -71,9 +71,9 @@ static void put(struct slot_map *m, int slot)
 	spin_lock(&m->q.lock);
 	__clear_bit(slot, m->map);
 	v = ++m->c;
-	if (unlikely(v == 1))	/* no free slots -> one free slot */
+	if (v > 0)
 		wake_up_locked(&m->q);
-	else if (unlikely(v == -1))	/* finished dying */
+	if (unlikely(v == -1))     /* finished dying */
 		wake_up_all_locked(&m->q);
 	spin_unlock(&m->q.lock);
 }
@@ -105,7 +105,7 @@ static int wait_for_free(struct slot_map *m)
 			left = t;
 		else
 			left = t + (left - n);
-		if (unlikely(signal_pending(current)))
+		if (signal_pending(current))
 			left = -EINTR;
 	} while (left > 0);
 
@@ -138,7 +138,7 @@ static int get(struct slot_map *m)
 
 /* used to describe mapped buffers */
 struct orangefs_bufmap_desc {
-	void *uaddr;			/* user space address pointer */
+	void __user *uaddr;		/* user space address pointer */
 	struct page **page_array;	/* array of mapped pages */
 	int array_count;		/* size of above arrays */
 	struct list_head list_link;
@@ -168,10 +168,7 @@ static DEFINE_SPINLOCK(orangefs_bufmap_lock);
 static void
 orangefs_bufmap_unmap(struct orangefs_bufmap *bufmap)
 {
-	int i;
-
-	for (i = 0; i < bufmap->page_count; i++)
-		put_page(bufmap->page_array[i]);
+	unpin_user_pages(bufmap->page_array, bufmap->page_count);
 }
 
 static void
@@ -184,7 +181,7 @@ orangefs_bufmap_free(struct orangefs_bufmap *bufmap)
 }
 
 /*
- * XXX: Can the size and shift change while the caller gives up the 
+ * XXX: Can the size and shift change while the caller gives up the
  * XXX: lock between calling this and doing something useful?
  */
 
@@ -200,34 +197,8 @@ int orangefs_bufmap_size_query(void)
 	return size;
 }
 
-int orangefs_bufmap_shift_query(void)
-{
-	struct orangefs_bufmap *bufmap;
-	int shift = 0;
-	spin_lock(&orangefs_bufmap_lock);
-	bufmap = __orangefs_bufmap;
-	if (bufmap)
-		shift = bufmap->desc_shift;
-	spin_unlock(&orangefs_bufmap_lock);
-	return shift;
-}
-
 static DECLARE_WAIT_QUEUE_HEAD(bufmap_waitq);
 static DECLARE_WAIT_QUEUE_HEAD(readdir_waitq);
-
-/*
- * orangefs_get_bufmap_init
- *
- * If bufmap_init is 1, then the shared memory system, including the
- * buffer_index_array, is available.  Otherwise, it is not.
- *
- * returns the value of bufmap_init
- */
-int orangefs_get_bufmap_init(void)
-{
-	return __orangefs_bufmap ? 1 : 0;
-}
-
 
 static struct orangefs_bufmap *
 orangefs_bufmap_alloc(struct ORANGEFS_dev_map_desc *user_desc)
@@ -281,8 +252,8 @@ orangefs_bufmap_map(struct orangefs_bufmap *bufmap,
 	int offset = 0, ret, i;
 
 	/* map the pages */
-	ret = get_user_pages_fast((unsigned long)user_desc->ptr,
-			     bufmap->page_count, 1, bufmap->page_array);
+	ret = pin_user_pages_fast((unsigned long)user_desc->ptr,
+			     bufmap->page_count, FOLL_WRITE, bufmap->page_array);
 
 	if (ret < 0)
 		return ret;
@@ -291,10 +262,8 @@ orangefs_bufmap_map(struct orangefs_bufmap *bufmap,
 		gossip_err("orangefs error: asked for %d pages, only got %d.\n",
 				bufmap->page_count, ret);
 
-		for (i = 0; i < ret; i++) {
-			SetPageError(bufmap->page_array[i]);
-			put_page(bufmap->page_array[i]);
-		}
+		for (i = 0; i < ret; i++)
+			unpin_user_page(bufmap->page_array[i]);
 		return -ENOMEM;
 	}
 
@@ -495,7 +464,7 @@ void orangefs_readdir_index_put(int buffer_index)
 }
 
 /*
- * we've been handed an iovec, we need to copy it to 
+ * we've been handed an iovec, we need to copy it to
  * the shared memory descriptor at "buffer_index".
  */
 int orangefs_bufmap_copy_from_iovec(struct iov_iter *iter,

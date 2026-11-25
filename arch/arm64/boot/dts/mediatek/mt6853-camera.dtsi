@@ -1,0 +1,196 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Cannong camera additions (drivers/misc/mtk-cam, CONFIG_MTK_CAM_PORT).
+ *
+ * The sensors, the camera I2C clients and kd_camera_hw1 (supplies, reset,
+ * powerdown and MCLK pin states) come from the stock board overlay; the
+ * seninf_top node (clocks, CAM power domain) from the stock base. What is
+ * missing is a usable binding for the four camera I2C buses:
+ *
+ *   i2c2: camera_main@20 (s5kgm1st), camera_main_af@18, eeprom@50
+ *   i2c4: camera_sub@5a (hi259 front), eeprom@51
+ *   i2c8: camera_sub_two@60 / camera_main_two@6c (s5k3l6, ov02b10, ov8856),
+ *         eeprom@50/@51
+ *   i2c9: camera LDO PMICs pm8008@8/@9 and fan53870@35
+ *
+ * They keep the vendor "mediatek,i2c" binding, which i2c-mt65xx does not
+ * match, so the buses never probe. Use the i2c5 binding: the main clock is
+ * the IMP_IIC_WRAP_WS (i2c2/i2c4) or IMP_IIC_WRAP_S (i2c8/i2c9) gate, DMA
+ * is the infracfg AP DMA gate.
+ *
+ * The camera drivers themselves stay unregistered unless the kernel is
+ * booted with mtk_cam.hw=1; with the default the buses probe empty.
+ *
+ * Kill switch: drop the #include, or set status = "disabled" on the bus.
+ *
+ * mediatek,stock-xfer: use the 4.14 vendor transfer semantics in
+ * i2c-mt65xx (DMAACK/ASYNC control bits, SCL-low HW timeout IRQ, optional
+ * FIFO mode); off at runtime with i2c_mt65xx.stock_xfer=0.
+ */
+
+&i2c2 {
+	compatible = "mediatek,mt6853-i2c";
+	mediatek,stock-xfer;
+	clocks = <&imp_iic_wrap_ws_clk 0x01 &{/syson@10001000} 0x59>;
+	clock-names = "main", "dma";
+	#address-cells = <1>;
+	#size-cells = <0>;
+};
+
+&i2c4 {
+	compatible = "mediatek,mt6853-i2c";
+	mediatek,stock-xfer;
+	clocks = <&imp_iic_wrap_ws_clk 0x02 &{/syson@10001000} 0x59>;
+	clock-names = "main", "dma";
+	#address-cells = <1>;
+	#size-cells = <0>;
+};
+
+&i2c8 {
+	compatible = "mediatek,mt6853-i2c";
+	mediatek,stock-xfer;
+	clocks = <&imp_iic_wrap_s_clk 0x02 &{/syson@10001000} 0x59>;
+	clock-names = "main", "dma";
+	#address-cells = <1>;
+	#size-cells = <0>;
+};
+
+&i2c9 {
+	compatible = "mediatek,mt6853-i2c";
+	mediatek,stock-xfer;
+	clocks = <&imp_iic_wrap_s_clk 0x03 &{/syson@10001000} 0x59>;
+	clock-names = "main", "dma";
+	#address-cells = <1>;
+	#size-cells = <0>;
+};
+
+/*
+ * ISP P1 (drivers/misc/mtk-cam/isp, mtk_cam.isp=1): the raw and camsv DMA
+ * engines go through the M4U. Every port the HAL can enable is listed so
+ * mtk_iommu turns translation on for it and links the node to its larb
+ * (runtime-resuming the node powers the larb). All of them live in the
+ * 8G-12G camera/MDP region, i.e. one shared IOMMU domain.
+ *   cam1 (raw A) -> larb16 ports 0-16, cam2 (raw B) -> larb17 ports 0-16,
+ *   camsv3..8    -> larb13 ports 3-8 (CAMSV1..6).
+ */
+&cam1 {
+	iommus = <&iommu0 0x200>, <&iommu0 0x201>, <&iommu0 0x202>,
+		 <&iommu0 0x203>, <&iommu0 0x204>, <&iommu0 0x205>,
+		 <&iommu0 0x206>, <&iommu0 0x207>, <&iommu0 0x208>,
+		 <&iommu0 0x209>, <&iommu0 0x20a>, <&iommu0 0x20b>,
+		 <&iommu0 0x20c>, <&iommu0 0x20d>, <&iommu0 0x20e>,
+		 <&iommu0 0x20f>, <&iommu0 0x210>;
+};
+
+&cam2 {
+	iommus = <&iommu0 0x220>, <&iommu0 0x221>, <&iommu0 0x222>,
+		 <&iommu0 0x223>, <&iommu0 0x224>, <&iommu0 0x225>,
+		 <&iommu0 0x226>, <&iommu0 0x227>, <&iommu0 0x228>,
+		 <&iommu0 0x229>, <&iommu0 0x22a>, <&iommu0 0x22b>,
+		 <&iommu0 0x22c>, <&iommu0 0x22d>, <&iommu0 0x22e>,
+		 <&iommu0 0x22f>, <&iommu0 0x230>;
+};
+
+&{/camsv3@1a092000} {
+	iommus = <&iommu0 0x1a3>;
+};
+
+&{/camsv4@1a093000} {
+	iommus = <&iommu0 0x1a4>;
+};
+
+&{/camsv5@1a094000} {
+	iommus = <&iommu0 0x1a5>;
+};
+
+&{/camsv6@1a095000} {
+	iommus = <&iommu0 0x1a6>;
+};
+
+&{/camsv7@1a096000} {
+	iommus = <&iommu0 0x1a7>;
+};
+
+&{/camsv8@1a097000} {
+	iommus = <&iommu0 0x1a8>;
+};
+
+/*
+ * /dev/ion compat (mtk_ion_compat.enable=1): ION_MM_GET_IOVA maps buffers
+ * through this node, i.e. into the same camera/MDP domain as above.
+ */
+/ {
+	ion_compat_iova: ion-compat-iova {
+		compatible = "mediatek,mtk-ion-compat-iova";
+		iommus = <&iommu0 0x200>;
+	};
+};
+
+/*
+ * ISP P2 (drivers/misc/mtk-cam/dip, mtk_cam.dip=1): DIP/MFB/MSS/MSF DMA goes
+ * through larb9 (imgsys1) and larb11 (imgsys2), ports 0-28 each. The iommus
+ * also link the config nodes to their larbs, so runtime-resuming them
+ * powers the ISP/ISP2 domains. Both larbs share the camera/MDP IOVA region.
+ */
+&imgsys_config {
+	iommus = <&iommu0 0x120>, <&iommu0 0x121>, <&iommu0 0x122>,
+		 <&iommu0 0x123>, <&iommu0 0x124>, <&iommu0 0x125>,
+		 <&iommu0 0x126>, <&iommu0 0x127>, <&iommu0 0x128>,
+		 <&iommu0 0x129>, <&iommu0 0x12a>, <&iommu0 0x12b>,
+		 <&iommu0 0x12c>, <&iommu0 0x12d>, <&iommu0 0x12e>,
+		 <&iommu0 0x12f>, <&iommu0 0x130>, <&iommu0 0x131>,
+		 <&iommu0 0x132>, <&iommu0 0x133>, <&iommu0 0x134>,
+		 <&iommu0 0x135>, <&iommu0 0x136>, <&iommu0 0x137>,
+		 <&iommu0 0x138>, <&iommu0 0x139>, <&iommu0 0x13a>,
+		 <&iommu0 0x13b>, <&iommu0 0x13c>;
+};
+
+&imgsys2_config {
+	iommus = <&iommu0 0x160>, <&iommu0 0x161>, <&iommu0 0x162>,
+		 <&iommu0 0x163>, <&iommu0 0x164>, <&iommu0 0x165>,
+		 <&iommu0 0x166>, <&iommu0 0x167>, <&iommu0 0x168>,
+		 <&iommu0 0x169>, <&iommu0 0x16a>, <&iommu0 0x16b>,
+		 <&iommu0 0x16c>, <&iommu0 0x16d>, <&iommu0 0x16e>,
+		 <&iommu0 0x16f>, <&iommu0 0x170>, <&iommu0 0x171>,
+		 <&iommu0 0x172>, <&iommu0 0x173>, <&iommu0 0x174>,
+		 <&iommu0 0x175>, <&iommu0 0x176>, <&iommu0 0x177>,
+		 <&iommu0 0x178>, <&iommu0 0x179>, <&iommu0 0x17a>,
+		 <&iommu0 0x17b>, <&iommu0 0x17c>;
+};
+
+/*
+ * MDP compat (drivers/misc/mtk-cam/mdp, mtk_cam.mdp=1): /dev/mtk_mdp runs the
+ * stock libdpframework command lists on GCE threads 19-22 (the threads the
+ * 4.14 MDP driver used). larb2 ports 0-3 are RDMA0/1 and WROT0/1; the link
+ * to larb2 powers the MDP (DIS) domain. Event ids come from mdp_rdma0.
+ */
+/ {
+	mdp_compat: mdp-compat {
+		compatible = "mediatek,mt6853-mdp-compat";
+		mboxes = <&gce_mbox 0x13 0 1>, <&gce_mbox 0x14 0 1>,
+			 <&gce_mbox 0x15 0 1>, <&gce_mbox 0x16 0 1>;
+		iommus = <&iommu0 0x40>, <&iommu0 0x41>,
+			 <&iommu0 0x42>, <&iommu0 0x43>;
+		clocks = <&mdpsys_config_clk 0>,
+			 <&mdpsys_config_clk 1>,
+			 <&mdpsys_config_clk 2>,
+			 <&mdpsys_config_clk 3>,
+			 <&mdpsys_config_clk 4>,
+			 <&mdpsys_config_clk 5>,
+			 <&mdpsys_config_clk 6>,
+			 <&mdpsys_config_clk 7>,
+			 <&mdpsys_config_clk 8>,
+			 <&mdpsys_config_clk 9>,
+			 <&mdpsys_config_clk 10>,
+			 <&mdpsys_config_clk 11>,
+			 <&mdpsys_config_clk 12>,
+			 <&mdpsys_config_clk 13>,
+			 <&mdpsys_config_clk 14>,
+			 <&mdpsys_config_clk 15>,
+			 <&mdpsys_config_clk 16>,
+			 <&mdpsys_config_clk 17>,
+			 <&mdpsys_config_clk 18>,
+			 <&mdpsys_config_clk 19>;
+		mediatek,event-node = <&mdp_rdma0>;
+	};
+};

@@ -14,7 +14,6 @@
 #include <linux/pm_runtime.h>
 #include <sound/soc.h>
 #include <linux/arm-smccc.h> /* for Kernel Native SMC API */
-#include <mt-plat/mtk_secure_api.h> /* for SMC ID table */
 
 #ifdef CONFIG_MTK_ACAO_SUPPORT
 #include "mtk_mcdi_governor_hint.h"
@@ -28,6 +27,15 @@
 #include "../common/mtk-mmap-ion.h"
 
 #include "mt6853-afe-common.h"
+#include "../common/mtk-afe-platform-driver.h"
+
+static struct mtk_base_afe *mt6853_afe_from_rtd(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_component *component =
+		snd_soc_rtdcom_lookup(rtd, AFE_PCM_NAME);
+
+	return snd_soc_component_get_drvdata(component);
+}
 #include "mt6853-afe-clk.h"
 #include "mt6853-afe-gpio.h"
 #include "mt6853-interconnection.h"
@@ -68,7 +76,7 @@ static int mt6853_fe_startup(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
 	struct snd_pcm_runtime *runtime = substream->runtime;
-	int memif_num = rtd->cpu_dai->id;
+	int memif_num = snd_soc_rtd_to_cpu(rtd, 0)->id;
 	struct mtk_base_afe_memif *memif = &afe->memif[memif_num];
 	const struct snd_pcm_hardware *mtk_afe_hardware = afe->mtk_afe_hardware;
 	int ret;
@@ -102,13 +110,13 @@ static int mt6853_fe_startup(struct snd_pcm_substream *substream,
 	return ret;
 }
 
-void mt6853_fe_shutdown(struct snd_pcm_substream *substream,
+static void mt6853_fe_shutdown(struct snd_pcm_substream *substream,
 			struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
 	struct mt6853_afe_private *afe_priv = afe->platform_priv;
-	int memif_num = rtd->cpu_dai->id;
+	int memif_num = snd_soc_rtd_to_cpu(rtd, 0)->id;
 	struct mtk_base_afe_memif *memif = &afe->memif[memif_num];
 	int irq_id = memif->irq_usage;
 
@@ -123,14 +131,14 @@ void mt6853_fe_shutdown(struct snd_pcm_substream *substream,
 	}
 }
 
-int mt6853_fe_trigger(struct snd_pcm_substream *substream, int cmd,
+static int mt6853_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 		      struct snd_soc_dai *dai)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_pcm_runtime * const runtime = substream->runtime;
 	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
 	struct mt6853_afe_private *afe_priv = afe->platform_priv;
-	int id = rtd->cpu_dai->id;
+	int id = snd_soc_rtd_to_cpu(rtd, 0)->id;
 	struct mtk_base_afe_memif *memif = &afe->memif[id];
 	int irq_id = memif->irq_usage;
 	struct mtk_base_afe_irq *irqs = &afe->irqs[irq_id];
@@ -147,7 +155,7 @@ int mt6853_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 		/* set memif enable */
-		if (memif->vow_bargein_enable)
+		if (memif->vow_barge_in_enable)
 			/* memif will be set by scp */
 			ret = 0;
 		else
@@ -181,7 +189,7 @@ int mt6853_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 		if (afe_priv->irq_cnt[id] > 0)
 			counter = afe_priv->irq_cnt[id];
 
-		mtk_regmap_update_bits(afe->regmap, irq_data->irq_cnt_reg,
+		regmap_update_bits(afe->regmap, irq_data->irq_cnt_reg,
 				       irq_data->irq_cnt_maskbit
 				       << irq_data->irq_cnt_shift,
 				       counter << irq_data->irq_cnt_shift);
@@ -192,7 +200,7 @@ int mt6853_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 		if (fs < 0)
 			return -EINVAL;
 
-		mtk_regmap_update_bits(afe->regmap, irq_data->irq_fs_reg,
+		regmap_update_bits(afe->regmap, irq_data->irq_fs_reg,
 				       irq_data->irq_fs_maskbit
 				       << irq_data->irq_fs_shift,
 				       fs << irq_data->irq_fs_shift);
@@ -203,7 +211,7 @@ int mt6853_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 #if defined(CONFIG_SND_SOC_MTK_AUDIO_DSP)
 			mtk_dsp_irq_set_enable(afe, irq_data);
 #else
-			mtk_regmap_update_bits(afe->regmap,
+			regmap_update_bits(afe->regmap,
 					       irq_data->irq_en_reg,
 					       1 << irq_data->irq_en_shift,
 					       1 << irq_data->irq_en_shift);
@@ -247,7 +255,7 @@ int mt6853_fe_trigger(struct snd_pcm_substream *substream, int cmd,
 #else
 		/* barge-in set stop_threshold == ~(0U), interrupt is set by scp */
 		if (runtime->stop_threshold != ~(0U))
-			mtk_regmap_update_bits(afe->regmap,
+			regmap_update_bits(afe->regmap,
 					       irq_data->irq_en_reg,
 					       1 << irq_data->irq_en_shift,
 					       0 << irq_data->irq_en_shift);
@@ -269,8 +277,8 @@ static int mt6853_memif_fs(struct snd_pcm_substream *substream,
 			   unsigned int rate)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct mtk_base_afe *afe = snd_soc_platform_get_drvdata(rtd->platform);
-	int id = rtd->cpu_dai->id;
+	struct mtk_base_afe *afe = mt6853_afe_from_rtd(rtd);
+	int id = snd_soc_rtd_to_cpu(rtd, 0)->id;
 
 	return mt6853_rate_transform(afe->dev, rate, id);
 }
@@ -284,12 +292,12 @@ static int mt6853_get_dai_fs(struct mtk_base_afe *afe,
 static int mt6853_irq_fs(struct snd_pcm_substream *substream, unsigned int rate)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct mtk_base_afe *afe = snd_soc_platform_get_drvdata(rtd->platform);
+	struct mtk_base_afe *afe = mt6853_afe_from_rtd(rtd);
 
 	return mt6853_general_rate_transform(afe->dev, rate);
 }
 
-int mt6853_get_memif_pbuf_size(struct snd_pcm_substream *substream)
+static int mt6853_get_memif_pbuf_size(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 
@@ -306,7 +314,7 @@ int mt6853_fe_prepare(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_pcm_runtime * const runtime = substream->runtime;
 	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
-	int id = rtd->cpu_dai->id;
+	int id = snd_soc_rtd_to_cpu(rtd, 0)->id;
 	struct mtk_base_afe_memif *memif = &afe->memif[id];
 	int irq_id = memif->irq_usage;
 	struct mtk_base_afe_irq *irqs = &afe->irqs[irq_id];
@@ -320,7 +328,7 @@ int mt6853_fe_prepare(struct snd_pcm_substream *substream,
 		goto exit;
 
 	/* set irq counter */
-	mtk_regmap_update_bits(afe->regmap, irq_data->irq_cnt_reg,
+	regmap_update_bits(afe->regmap, irq_data->irq_cnt_reg,
 			       irq_data->irq_cnt_maskbit
 			       << irq_data->irq_cnt_shift,
 			       counter << irq_data->irq_cnt_shift);
@@ -331,7 +339,7 @@ int mt6853_fe_prepare(struct snd_pcm_substream *substream,
 	if (fs < 0)
 		return -EINVAL;
 
-	mtk_regmap_update_bits(afe->regmap, irq_data->irq_fs_reg,
+	regmap_update_bits(afe->regmap, irq_data->irq_fs_reg,
 			       irq_data->irq_fs_maskbit
 			       << irq_data->irq_fs_shift,
 			       fs << irq_data->irq_fs_shift);
@@ -1263,11 +1271,7 @@ static int mt6853_mmap_ion_get(struct snd_kcontrol *kcontrol,
 static int mt6853_mmap_ion_set(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
-	/* for bring up */
-#if 1
-	mtk_get_ion_buffer();
-#endif
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 static int mt6853_dl_mmap_fd_get(struct snd_kcontrol *kcontrol,
@@ -1312,7 +1316,85 @@ static int mt6853_ul_mmap_fd_set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int mt6853_dsp_off_get(struct snd_kcontrol *kcontrol,
+			      struct snd_ctl_elem_value *ucontrol)
+{
+	/* no audio DSP on this build, keep every task on the AP path */
+	ucontrol->value.integer.value[0] = 0;
+	return 0;
+}
+
+static int mt6853_dsp_off_set(struct snd_kcontrol *kcontrol,
+			      struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
 static const struct snd_kcontrol_new mt6853_pcm_kcontrols[] = {
+	SOC_SINGLE_EXT("dsp_a2dp_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_a2dp_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_bledl_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_bledl_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_bleul_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_call_final_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_call_final_ref_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_call_final_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_captureraw_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_captureraw_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_captureul1_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_captureul1_ref_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_captureul1_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_dataprovider_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_dataprovider_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_deepbuf_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_deepbuf_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_fast_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_fast_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_fm_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_fm_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_ktv_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_music_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_offload_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_offload_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_playback_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_playback_ref_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_playback_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_primary_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_primary_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_voipdl_default_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
+	SOC_SINGLE_EXT("dsp_voipdl_runtime_en", SND_SOC_NOPM, 0, 0x1, 0,
+		       mt6853_dsp_off_get, mt6853_dsp_off_set),
 	SOC_SINGLE_EXT("Audio IRQ1 CNT", SND_SOC_NOPM, 0, 0x3ffff, 0,
 		       mt6853_irq_cnt1_get, mt6853_irq_cnt1_set),
 	SOC_SINGLE_EXT("Audio IRQ2 CNT", SND_SOC_NOPM, 0, 0x3ffff, 0,
@@ -1971,10 +2053,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL1_CON0,
-		.pbuf_mask_shift = DL1_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL1_PBUF_SIZE_MASK,
 		.pbuf_shift = DL1_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL1_CON0,
-		.minlen_mask_shift = DL1_MINLEN_MASK_SFT,
+		.minlen_mask = DL1_MINLEN_MASK,
 		.minlen_shift = DL1_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL12] = {
@@ -2000,10 +2082,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL12_CON0,
-		.pbuf_mask_shift = DL12_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL12_PBUF_SIZE_MASK,
 		.pbuf_shift = DL12_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL12_CON0,
-		.minlen_mask_shift = DL12_MINLEN_MASK_SFT,
+		.minlen_mask = DL12_MINLEN_MASK,
 		.minlen_shift = DL12_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL2] = {
@@ -2029,10 +2111,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL2_CON0,
-		.pbuf_mask_shift = DL2_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL2_PBUF_SIZE_MASK,
 		.pbuf_shift = DL2_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL2_CON0,
-		.minlen_mask_shift = DL2_MINLEN_MASK_SFT,
+		.minlen_mask = DL2_MINLEN_MASK,
 		.minlen_shift = DL2_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL3] = {
@@ -2058,10 +2140,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL3_CON0,
-		.pbuf_mask_shift = DL3_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL3_PBUF_SIZE_MASK,
 		.pbuf_shift = DL3_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL3_CON0,
-		.minlen_mask_shift = DL3_MINLEN_MASK_SFT,
+		.minlen_mask = DL3_MINLEN_MASK,
 		.minlen_shift = DL3_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL4] = {
@@ -2087,10 +2169,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL4_CON0,
-		.pbuf_mask_shift = DL4_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL4_PBUF_SIZE_MASK,
 		.pbuf_shift = DL4_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL4_CON0,
-		.minlen_mask_shift = DL4_MINLEN_MASK_SFT,
+		.minlen_mask = DL4_MINLEN_MASK,
 		.minlen_shift = DL4_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL5] = {
@@ -2116,10 +2198,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL5_CON0,
-		.pbuf_mask_shift = DL5_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL5_PBUF_SIZE_MASK,
 		.pbuf_shift = DL5_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL5_CON0,
-		.minlen_mask_shift = DL5_MINLEN_MASK_SFT,
+		.minlen_mask = DL5_MINLEN_MASK,
 		.minlen_shift = DL5_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL6] = {
@@ -2145,10 +2227,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL6_CON0,
-		.pbuf_mask_shift = DL6_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL6_PBUF_SIZE_MASK,
 		.pbuf_shift = DL6_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL6_CON0,
-		.minlen_mask_shift = DL6_MINLEN_MASK_SFT,
+		.minlen_mask = DL6_MINLEN_MASK,
 		.minlen_shift = DL6_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL7] = {
@@ -2174,10 +2256,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL7_CON0,
-		.pbuf_mask_shift = DL7_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL7_PBUF_SIZE_MASK,
 		.pbuf_shift = DL7_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL7_CON0,
-		.minlen_mask_shift = DL7_MINLEN_MASK_SFT,
+		.minlen_mask = DL7_MINLEN_MASK,
 		.minlen_shift = DL7_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL8] = {
@@ -2203,10 +2285,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL8_CON0,
-		.pbuf_mask_shift = DL8_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL8_PBUF_SIZE_MASK,
 		.pbuf_shift = DL8_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL8_CON0,
-		.minlen_mask_shift = DL8_MINLEN_MASK_SFT,
+		.minlen_mask = DL8_MINLEN_MASK,
 		.minlen_shift = DL8_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DL9] = {
@@ -2232,10 +2314,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_DL9_CON0,
-		.pbuf_mask_shift = DL9_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = DL9_PBUF_SIZE_MASK,
 		.pbuf_shift = DL9_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_DL9_CON0,
-		.minlen_mask_shift = DL9_MINLEN_MASK_SFT,
+		.minlen_mask = DL9_MINLEN_MASK,
 		.minlen_shift = DL9_MINLEN_SFT,
 	},
 	[MT6853_MEMIF_DAI] = {
@@ -2325,7 +2407,7 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.mono_reg = AFE_VUL12_CON0,
 		.mono_shift = VUL12_MONO_SFT,
 		.quad_ch_reg = AFE_VUL12_CON0,
-		.quad_ch_mask_shift = VUL12_4CH_EN_MASK_SFT,
+		.quad_ch_mask = VUL12_4CH_EN_MASK,
 		.quad_ch_shift = VUL12_4CH_EN_SFT,
 		.enable_reg = AFE_DAC_CON0,
 		.enable_shift = VUL12_ON_SFT,
@@ -2520,10 +2602,10 @@ static const struct mtk_base_memif_data memif_data[MT6853_MEMIF_NUM] = {
 		.msb_reg = -1,
 		.msb_shift = -1,
 		.pbuf_reg = AFE_HDMI_OUT_CON0,
-		.pbuf_mask_shift = HDMI_OUT_PBUF_SIZE_MASK_SFT,
+		.pbuf_mask = HDMI_OUT_PBUF_SIZE_MASK,
 		.pbuf_shift = HDMI_OUT_PBUF_SIZE_SFT,
 		.minlen_reg = AFE_HDMI_OUT_CON0,
-		.minlen_mask_shift = HDMI_OUT_MINLEN_MASK_SFT,
+		.minlen_mask = HDMI_OUT_MINLEN_MASK,
 		.minlen_shift = HDMI_OUT_MINLEN_SFT,
 	},
 };
@@ -3425,11 +3507,11 @@ skip_regmap:
 
 static int mt6853_afe_pcm_copy(struct snd_pcm_substream *substream,
 			       int channel, unsigned long hwoff,
-			       void *buf, unsigned long bytes,
+			       struct iov_iter *buf, unsigned long bytes,
 			       mtk_sp_copy_f sp_copy)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct mtk_base_afe *afe = snd_soc_platform_get_drvdata(rtd->platform);
+	struct mtk_base_afe *afe = mt6853_afe_from_rtd(rtd);
 	int ret = 0;
 
 	mt6853_set_audio_int_bus_parent(afe, CLK_TOP_MAINPLL_D4_D4);
@@ -3545,18 +3627,22 @@ static const struct mtk_audio_sram_ops mt6853_sram_ops = {
 	.set_sram_mode = mt6853_set_sram_mode,
 };
 
-static int mt6853_afe_pcm_platform_probe(struct snd_soc_platform *platform)
+static int mt6853_afe_component_probe(struct snd_soc_component *component)
 {
-	mtk_afe_add_sub_dai_control(platform);
-	mt6853_add_misc_control(platform);
+	mtk_afe_add_sub_dai_control(component);
+	mt6853_add_misc_control(component);
 	return 0;
 }
 
-const struct snd_soc_platform_driver mt6853_afe_pcm_platform = {
-	.ops = &mtk_afe_pcm_ops,
-	.pcm_new = mtk_afe_pcm_new,
-	.pcm_free = mtk_afe_pcm_free,
-	.probe = mt6853_afe_pcm_platform_probe,
+static const struct snd_soc_component_driver mt6853_afe_component = {
+	.name = AFE_PCM_NAME,
+	.probe = mt6853_afe_component_probe,
+	.open = mtk_afe_pcm_open,
+	.pointer = mtk_afe_pcm_pointer,
+	.mmap = mtk_afe_pcm_mmap,
+	.pcm_construct = mtk_afe_pcm_new,
+	.pcm_destruct = mtk_afe_pcm_free,
+	.copy = mtk_afe_pcm_copy_user,
 };
 
 static ssize_t mt6853_debugfs_read(struct file *file, char __user *buf,
@@ -6175,12 +6261,13 @@ static int mt6853_afe_pcm_dev_probe(struct platform_device *pdev)
 					   S_IFREG | 0444, NULL,
 					   afe, &mt6853_debugfs_ops);
 
-	/* register platform */
-	ret = devm_snd_soc_register_platform(&pdev->dev,
-					     &mt6853_afe_pcm_platform);
+	/* Register the PCM platform component and the device-specific DAIs. */
+	ret = devm_snd_soc_register_component(&pdev->dev,
+						     &mt6853_afe_component,
+						     NULL, 0);
 	if (ret) {
-		dev_warn(dev, "err_platform\n");
-		goto err_platform;
+		dev_warn(dev, "err_platform_component\n");
+		goto err_pm_disable;
 	}
 
 	ret = devm_snd_soc_register_component(&pdev->dev,
@@ -6206,8 +6293,6 @@ static int mt6853_afe_pcm_dev_probe(struct platform_device *pdev)
 err_dai_component:
 	snd_soc_unregister_component(&pdev->dev);
 
-err_platform:
-	snd_soc_unregister_platform(&pdev->dev);
 
 err_pm_disable:
 	pm_runtime_disable(&pdev->dev);
@@ -6215,7 +6300,7 @@ err_pm_disable:
 	return ret;
 }
 
-static int mt6853_afe_pcm_dev_remove(struct platform_device *pdev)
+static void mt6853_afe_pcm_dev_remove(struct platform_device *pdev)
 {
 	struct mtk_base_afe *afe = platform_get_drvdata(pdev);
 
@@ -6225,7 +6310,6 @@ static int mt6853_afe_pcm_dev_remove(struct platform_device *pdev)
 
 	/* disable afe clock */
 	mt6853_afe_disable_clock(afe);
-	return 0;
 }
 
 static const struct of_device_id mt6853_afe_pcm_dt_match[] = {

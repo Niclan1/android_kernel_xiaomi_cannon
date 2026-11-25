@@ -6,10 +6,8 @@
 #include <linux/interrupt.h>
 #include <linux/math64.h>
 
-#define TICK_SIZE (tick_nsec / 1000)
-
 unsigned long long native_sched_clock(void);
-extern int recalibrate_cpu_khz(void);
+extern void recalibrate_cpu_khz(void);
 
 extern int no_timer_check;
 

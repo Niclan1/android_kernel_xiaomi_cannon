@@ -1,0 +1,8 @@
+What:		/sys/class/leds/lcd-backlight/brightness
+What:		/sys/class/leds/lcd-backlight/max_brightness
+Date:		November 2026
+Contact:	Linux backlight mailing list <dri-devel@lists.freedesktop.org>
+Description:
+		Compatibility interface for the cannon light HAL. Brightness
+		ranges from 0 to 2047, with the same units as the backlight-class
+		interface. Writes use the backlight core and respect panel blanking.

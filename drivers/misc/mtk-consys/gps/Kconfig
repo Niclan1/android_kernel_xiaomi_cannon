@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTK_CONSYS_GPS
+	bool "MediaTek MT6853 consys GNSS (/dev/stpgps, gps_emi, gps_pwr)"
+	depends on MTK_CONSYS_WMT
+	default n
+	help
+	  The /dev/stpgps character device used by the vendor mnld GNSS
+	  daemon: the GNSS data stream carried over the WMT/STP core. The
+	  GNSS function is powered through WMT on the first open and powered
+	  down again on the last close. Nothing happens at boot.
+
+	  /dev/gps_emi maps the GNSS window of the consys reserved EMI for
+	  mnld and /dev/gps_pwr reports the connsys low-battery level.
+
+	  The node is only created once the vendor wmt_loader has initialised
+	  the connectivity drivers. mtk_stpgps.enable=0 on the kernel command
+	  line keeps the node from being created.
+
+	  If unsure, say N.

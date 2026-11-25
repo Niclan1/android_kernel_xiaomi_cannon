@@ -1,0 +1,382 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * MT6853 (Redmi Note 9T): LVTS temperature sensors, thermal zones and cooling maps.
+ *
+ * Include this file at the END of mt6853.dts and build with CONFIG_MTK_THERMAL=y and
+ * CONFIG_MTK_LVTS_THERMAL=y. To switch it off again drop the include, or set
+ * status = "disabled" in &lvts_ap and &lvts_mcu (no sensor, no zone, no throttling).
+ *
+ * Calibration: the driver takes the factory data from /chosen "atag,devinfo" and otherwise
+ * uses built-in defaults, with which readings can be off by tens of degrees (see the dmesg line
+ * "calibration source"). The efuse is NOT accessed unless MT6853_THERMAL_EFUSE is defined before
+ * this file is included; that needs CONFIG_NVMEM_MTK_EFUSE=y and its address and layout are
+ * unverified on this SoC.
+ *
+ * Policy: the passive trip (85 C for the first boots, the stock cpu_adaptive trip is 65 C) throttles the cpufreq (LL = cpu0,
+ * L = cpu6) and devfreq (mali) cooling devices with step_wise; the critical trip (117 C, the
+ * stock sysrst trip, CPU and GPU zones only) powers the phone off. The driver drops implausible readings (< -20 C or
+ * > 150 C) so they never reach a trip. The modem sensors only report.
+ * The cooling devices need #cooling-cells in cpu0, cpu6 and mali, which the cpufreq and gfx
+ * fragments add.
+ */
+
+#include <dt-bindings/clock/mt6853-clk.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/thermal/mediatek,lvts-thermal.h>
+#include <dt-bindings/thermal/thermal.h>
+
+/* The vendor node spans 0x26e200 bytes and overlaps the real controller ranges below. */
+&{/therm_ctrl@1100b000} {
+	status = "disabled";
+};
+
+/ {
+	lvts_ap: thermal-sensor@1100b000 {
+		compatible = "mediatek,mt6853-lvts-ap";
+		reg = <0x00 0x1100b000 0x00 0xc00>;
+		interrupts = <GIC_SPI 169 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&infracfg_ao_clk CLK_IFRAO_THERM>;
+		#thermal-sensor-cells = <1>;
+#ifdef MT6853_THERMAL_EFUSE
+		nvmem-cells = <&lvts_calib_1>, <&lvts_calib_2>;
+		nvmem-cell-names = "lvts-calib-data-1", "lvts-calib-data-2";
+#endif
+	};
+
+	lvts_mcu: thermal-sensor@11278000 {
+		compatible = "mediatek,mt6853-lvts-mcu";
+		reg = <0x00 0x11278000 0x00 0x400>;
+		interrupts = <GIC_SPI 170 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&infracfg_ao_clk CLK_IFRAO_THERM>;
+		#thermal-sensor-cells = <1>;
+#ifdef MT6853_THERMAL_EFUSE
+		nvmem-cells = <&lvts_calib_1>, <&lvts_calib_2>;
+		nvmem-cell-names = "lvts-calib-data-1", "lvts-calib-data-2";
+#endif
+	};
+
+	/*
+	 * The passive trips are 85 C until the LVTS calibration is verified on the
+	 * phone (the stock kernel throttles at 65 C); a sensor offset must not be
+	 * able to pin the CPUs at their lowest OPP.
+	 */
+	thermal-zones {
+		/* Cortex-A55 cluster ("LL", cpu0..5): four sensors, cooled through cpu0 */
+		cpu-ll0-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_mcu MT6853_MCU_LL_CPU0>;
+
+			trips {
+				lvts_ll0_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-crit {
+					temperature = <117000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&lvts_ll0_alert>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		cpu-ll1-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_mcu MT6853_MCU_LL_CPU1>;
+
+			trips {
+				lvts_ll1_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-crit {
+					temperature = <117000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&lvts_ll1_alert>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		cpu-ll2-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_mcu MT6853_MCU_LL_CPU2>;
+
+			trips {
+				lvts_ll2_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-crit {
+					temperature = <117000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&lvts_ll2_alert>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		cpu-ll3-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_mcu MT6853_MCU_LL_CPU3>;
+
+			trips {
+				lvts_ll3_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-crit {
+					temperature = <117000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&lvts_ll3_alert>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		/* Cortex-A76 cluster ("L", cpu6..7): two sensors, cooled through cpu6 */
+		cpu-l0-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_mcu MT6853_MCU_L_CPU0>;
+
+			trips {
+				lvts_l0_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-crit {
+					temperature = <117000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&lvts_l0_alert>;
+					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		cpu-l1-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_mcu MT6853_MCU_L_CPU1>;
+
+			trips {
+				lvts_l1_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-crit {
+					temperature = <117000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&lvts_l1_alert>;
+					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		/* Mali GPU: cooled through the gpu devfreq cooling device */
+		gpu-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_ap MT6853_AP_GPU>;
+
+			trips {
+				lvts_gpu_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-crit {
+					temperature = <117000>;
+					hysteresis = <2000>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&lvts_gpu_alert>;
+					cooling-device = <&mali THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		/*
+		 * Report-only sensors: a hot notification trip, no critical trip (only the CPU and
+		 * GPU sensors may power the phone off; one badly calibrated minor sensor must not).
+		 */
+		cam-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_ap MT6853_AP_CAM>;
+
+			trips {
+				trip-hot {
+					temperature = <100000>;
+					hysteresis = <2000>;
+					type = "hot";
+				};
+			};
+		};
+
+		soc0-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_ap MT6853_AP_SOC0>;
+
+			trips {
+				trip-hot {
+					temperature = <100000>;
+					hysteresis = <2000>;
+					type = "hot";
+				};
+			};
+		};
+
+		soc1-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_ap MT6853_AP_SOC1>;
+
+			trips {
+				trip-hot {
+					temperature = <100000>;
+					hysteresis = <2000>;
+					type = "hot";
+				};
+			};
+		};
+
+		vpu-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_ap MT6853_AP_VPU>;
+
+			trips {
+				trip-hot {
+					temperature = <100000>;
+					hysteresis = <2000>;
+					type = "hot";
+				};
+			};
+		};
+
+		/* Modem sensors: never power the phone off because of these */
+		md-4g-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_ap MT6853_AP_MD0>;
+
+			trips {
+				trip-hot {
+					temperature = <100000>;
+					hysteresis = <2000>;
+					type = "hot";
+				};
+			};
+		};
+
+		md-5g-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_ap MT6853_AP_MD1>;
+
+			trips {
+				trip-hot {
+					temperature = <100000>;
+					hysteresis = <2000>;
+					type = "hot";
+				};
+			};
+		};
+
+		md-3g-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <250>;
+			thermal-sensors = <&lvts_ap MT6853_AP_MD2>;
+
+			trips {
+				trip-hot {
+					temperature = <100000>;
+					hysteresis = <2000>;
+					type = "hot";
+				};
+			};
+		};
+	};
+};
+
+#ifdef MT6853_THERMAL_EFUSE
+/*
+ * Efuse words 116..119 and 190..207 (the vendor devinfo indices of the LVTS data), read in this
+ * order by the driver through the two cells above.
+ */
+/ {
+	efuse@11c10000 {
+		compatible = "mediatek,mt8192-efuse", "mediatek,efuse";
+		reg = <0x00 0x11c10000 0x00 0x1000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		lvts_calib_1: lvts-calib-1@1d0 {
+			reg = <0x1d0 0x10>;
+		};
+
+		lvts_calib_2: lvts-calib-2@2f8 {
+			reg = <0x2f8 0x48>;
+		};
+	};
+};
+#endif

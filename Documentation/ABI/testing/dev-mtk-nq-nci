@@ -1,0 +1,30 @@
+What:           /dev/nq-nci
+Date:           November 2026
+Contact:        linux-nfc@lists.infradead.org
+Description:
+                Raw NCI I2C transport for the cannong vendor NFC HAL.
+                Reads and writes transfer up to 512 bytes. Probe requires a
+                complete CORE_RESET_RSP with success status. This verifies
+                transport, not HAL initialization, firmware or tag operation.
+
+                PN544_SET_PWR (_IOW(0xe9, 1, unsigned int)) takes a scalar:
+                  0: power off
+                  1: power on in normal mode
+                  2: firmware-download mode with VEN reset
+                  4: assert firmware-download pin
+                  5: VEN reset pulse
+                  6: deassert firmware-download pin
+                Modes 2, 4 and 6 require the firmware-download GPIO.
+                Mode 3 (eSE ISO reset) returns EOPNOTSUPP. Invalid power
+                arguments return EINVAL.
+
+                The following legacy operations return EOPNOTSUPP because
+                their eSE/arbitration semantics are not implemented:
+                  P61_SET_SPI_PWR, P61_GET_PWR_STATUS, P61_SET_WIRED_ACCESS,
+                  P544_SET_NFC_SERVICE_PID, P544_GET_ESE_ACCESS,
+                  P544_SET_POWER_SCHEME, P544_REL_SVDD_WAIT,
+                  PN544_SET_DWNLD_STATUS (JCOP download state),
+                  P544_REL_DWPONOFF_WAIT, P544_SECURE_TIMER_SESSION,
+                  NFCC_INITIAL_CORE_RESET_NTF.
+                Unknown ioctls return ENOTTY. There is no eSE/payment or
+                screen-off NFC wake capability implied by this endpoint.

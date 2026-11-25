@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+menuconfig MTK_SENSORHUB_PORT
+	bool "MediaTek MT6853 sensors, fingerprint, NFC and haptics port"
+	depends on OF && (ARCH_MEDIATEK || COMPILE_TEST)
+	default n
+	help
+	  Small drivers that give the stock MT6853 (Redmi Note 9T) vendor
+	  HALs the kernel interfaces they were written for: the AW8622 PWM
+	  haptic LED-class node, the NXP PN553 /dev/nq-nci node, the
+	  Goodix/FPC TEE fingerprint nodes and an SCP state probe.
+
+	  Every driver can also be disabled from the kernel command line
+	  with <driver>.enable=0.
+
+	  If unsure, say N.
+
+if MTK_SENSORHUB_PORT
+
+config MTK_AW8622_VIBRATOR
+	bool "Awinic AW8622 PWM haptic driver (LED class \"vibrator\")"
+	depends on PWM && GPIOLIB && LEDS_CLASS
+	help
+	  Drives the AW8622 LRA driver through a SoC PWM output and an
+	  enable GPIO. Exposes /sys/class/leds/vibrator/{activate,duration,
+	  state} as used by the MediaTek vibrator HAL.
+
+	  Disable at boot with aw8622_vibrator.enable=0.
+
+config MTK_NQ_NCI
+	bool "NXP PN553 NFC controller, qcom nq-nci compatible /dev/nq-nci"
+	depends on I2C && GPIOLIB
+	help
+	  Character device driver for the NXP PN553 NFC controller in the
+	  layout expected by the vendor NXP NCI HAL (nqx.default):
+	  /dev/nq-nci with the pn544 power-control ioctls.
+
+	  Disable at boot with mtk_nq_nci.enable=0.
+
+config MTK_TEE_FINGERPRINT
+	bool "Goodix / FPC fingerprint sensor glue for the Microtrust TEE"
+	depends on SPI && INPUT && NET && PINCTRL && MICROTRUST_FP_DRIVER
+	help
+	  Detects the side-mounted fingerprint sensor on SPI and exposes
+	  the Goodix /dev/goodix_fp interface (ioctls + netlink 29) and/or
+	  the FPC fpc1022 platform sysfs attributes. The image capture
+	  itself runs in the TEE. Selects the matching trusted application
+	  UUID for /dev/teei_fp; when the sensor ID cannot be read from the
+	  normal world both interfaces are exposed and the vendor HAL picks.
+
+	  Disable at boot with mtk_tee_fingerprint.enable=0; force a vendor
+	  with mtk_tee_fingerprint.vendor=goodix|fpc|both.
+
+config MTK_SCP_PROBE
+	bool "MT6853 SCP (sensor hub co-processor) state probe"
+	help
+	  Read-only diagnostics for the SCP that the bootloader starts:
+	  /sys/devices/platform/10500000.scp/scp_state reports the core
+	  status, program counter and the firmware region information.
+	  Registers are only read when the attribute is read. This does
+	  not provide sensors to Android yet.
+
+	  Disable at boot with mtk_scp_probe.enable=0.
+
+endif

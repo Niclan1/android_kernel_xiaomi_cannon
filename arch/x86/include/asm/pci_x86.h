@@ -5,7 +5,10 @@
  *	(c) 1999 Martin Mares <mj@ucw.cz>
  */
 
+#include <linux/errno.h>
+#include <linux/init.h>
 #include <linux/ioport.h>
+#include <linux/spinlock.h>
 
 #undef DEBUG
 
@@ -38,6 +41,9 @@ do {						\
 #define PCI_NOASSIGN_ROMS	0x80000
 #define PCI_ROOT_NO_CRS		0x100000
 #define PCI_NOASSIGN_BARS	0x200000
+#define PCI_BIG_ROOT_WINDOW	0x400000
+#define PCI_USE_E820		0x800000
+#define PCI_NO_E820		0x1000000
 
 extern unsigned int pci_probe;
 extern unsigned long pirq_table_addr;
@@ -63,6 +69,8 @@ void pcibios_scan_specific_bus(int busn);
 
 /* pci-irq.c */
 
+struct pci_dev;
+
 struct irq_info {
 	u8 bus, devfn;			/* Bus, device and function */
 	struct {
@@ -86,7 +94,16 @@ struct irq_routing_table {
 	u32 miniport_data;		/* Crap */
 	u8 rfu[11];
 	u8 checksum;			/* Modulo 256 checksum must give 0 */
-	struct irq_info slots[0];
+	struct irq_info slots[];
+} __attribute__((packed));
+
+struct irt_routing_table {
+	u32 signature;			/* IRT_SIGNATURE should be here */
+	u8 size;			/* Number of entries provided */
+	u8 used;			/* Number of entries actually used */
+	u16 exclusive_irqs;		/* IRQs devoted exclusively to
+					   PCI usage */
+	struct irq_info slots[];
 } __attribute__((packed));
 
 extern unsigned int pcibios_irq_mask;
@@ -113,14 +130,32 @@ extern const struct pci_raw_ops pci_direct_conf1;
 extern bool port_cf9_safe;
 
 /* arch_initcall level */
+#ifdef CONFIG_PCI_DIRECT
 extern int pci_direct_probe(void);
 extern void pci_direct_init(int type);
+#else
+static inline int pci_direct_probe(void) { return -1; }
+static inline  void pci_direct_init(int type) { }
+#endif
+
+#ifdef CONFIG_PCI_BIOS
 extern void pci_pcbios_init(void);
+#else
+static inline void pci_pcbios_init(void) { }
+#endif
+
 extern void __init dmi_check_pciprobe(void);
 extern void __init dmi_check_skip_isa_align(void);
 
 /* some common used subsys_initcalls */
+#ifdef CONFIG_PCI
 extern int __init pci_acpi_init(void);
+#else
+static inline int  __init pci_acpi_init(void)
+{
+	return -EINVAL;
+}
+#endif
 extern void __init pcibios_irq_init(void);
 extern int __init pcibios_init(void);
 extern int pci_legacy_init(void);
@@ -150,6 +185,8 @@ extern int pci_mmconfig_insert(struct device *dev, u16 seg, u8 start, u8 end,
 			       phys_addr_t addr);
 extern int pci_mmconfig_delete(u16 seg, u8 start, u8 end);
 extern struct pci_mmcfg_region *pci_mmconfig_lookup(int segment, int bus);
+extern struct pci_mmcfg_region *__init pci_mmconfig_add(int segment, int start,
+							int end, u64 addr);
 
 extern struct list_head pci_mmcfg_list;
 
@@ -162,41 +199,105 @@ extern struct list_head pci_mmcfg_list;
  * Guide (BKDG) For AMD Family 10h Processors", rev. 3.48, sec 2.11.1,
  * "MMIO Configuration Coding Requirements".
  */
-static inline unsigned char mmio_config_readb(void __iomem *pos)
+static inline unsigned char pci_mmcfg_readb(const volatile void __iomem *pos)
 {
 	u8 val;
 	asm volatile("movb (%1),%%al" : "=a" (val) : "r" (pos));
 	return val;
 }
 
-static inline unsigned short mmio_config_readw(void __iomem *pos)
+static inline unsigned short pci_mmcfg_readw(const volatile void __iomem *pos)
 {
 	u16 val;
 	asm volatile("movw (%1),%%ax" : "=a" (val) : "r" (pos));
 	return val;
 }
 
-static inline unsigned int mmio_config_readl(void __iomem *pos)
+static inline unsigned int pci_mmcfg_readl(const volatile void __iomem *pos)
 {
 	u32 val;
 	asm volatile("movl (%1),%%eax" : "=a" (val) : "r" (pos));
 	return val;
 }
 
-static inline void mmio_config_writeb(void __iomem *pos, u8 val)
+static inline void pci_mmcfg_writeb(unsigned char val, volatile void __iomem *pos)
 {
 	asm volatile("movb %%al,(%1)" : : "a" (val), "r" (pos) : "memory");
 }
 
-static inline void mmio_config_writew(void __iomem *pos, u16 val)
+static inline void pci_mmcfg_writew(unsigned short val, volatile void __iomem *pos)
 {
 	asm volatile("movw %%ax,(%1)" : : "a" (val), "r" (pos) : "memory");
 }
 
-static inline void mmio_config_writel(void __iomem *pos, u32 val)
+static inline void pci_mmcfg_writel(unsigned int val, volatile void __iomem *pos)
 {
 	asm volatile("movl %%eax,(%1)" : : "a" (val), "r" (pos) : "memory");
 }
+
+#ifdef CONFIG_PARAVIRT
+#include <asm/io.h>
+
+static inline unsigned char mmio_config_readb(void __iomem *pos)
+{
+	return __pv_mmio_read(pci_mmcfg_readb, pv_pci_mmcfg_readb, pos);
+}
+
+static inline unsigned short mmio_config_readw(void __iomem *pos)
+{
+	return __pv_mmio_read(pci_mmcfg_readw, pv_pci_mmcfg_readw, pos);
+}
+
+static inline unsigned int mmio_config_readl(void __iomem *pos)
+{
+	return __pv_mmio_read(pci_mmcfg_readl, pv_pci_mmcfg_readl, pos);
+}
+
+static inline void mmio_config_writeb(void __iomem *pos, u8 val)
+{
+	__pv_mmio_write(pci_mmcfg_writeb, pv_pci_mmcfg_writeb, val, pos);
+}
+
+static inline void mmio_config_writew(void __iomem *pos, u16 val)
+{
+	__pv_mmio_write(pci_mmcfg_writew, pv_pci_mmcfg_writew, val, pos);
+}
+
+static inline void mmio_config_writel(void __iomem *pos, u32 val)
+{
+	__pv_mmio_write(pci_mmcfg_writel, pv_pci_mmcfg_writel, val, pos);
+}
+#else
+static inline unsigned char mmio_config_readb(void __iomem *pos)
+{
+	return pci_mmcfg_readb(pos);
+}
+
+static inline unsigned short mmio_config_readw(void __iomem *pos)
+{
+	return pci_mmcfg_readw(pos);
+}
+
+static inline unsigned int mmio_config_readl(void __iomem *pos)
+{
+	return pci_mmcfg_readl(pos);
+}
+
+static inline void mmio_config_writeb(void __iomem *pos, u8 val)
+{
+	pci_mmcfg_writeb(val, pos);
+}
+
+static inline void mmio_config_writew(void __iomem *pos, u16 val)
+{
+	pci_mmcfg_writew(val, pos);
+}
+
+static inline void mmio_config_writel(void __iomem *pos, u32 val)
+{
+	pci_mmcfg_writel(val, pos);
+}
+#endif
 
 #ifdef CONFIG_PCI
 # ifdef CONFIG_ACPI
@@ -210,4 +311,10 @@ static inline void mmio_config_writel(void __iomem *pos, u32 val)
 # define x86_default_pci_init		NULL
 # define x86_default_pci_init_irq	NULL
 # define x86_default_pci_fixup_irqs	NULL
+#endif
+
+#if defined(CONFIG_PCI) && defined(CONFIG_ACPI)
+extern bool pci_use_e820;
+#else
+#define pci_use_e820 false
 #endif

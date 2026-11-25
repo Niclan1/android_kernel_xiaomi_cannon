@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * MT6853 (cannong) sensor-side peripherals for the mtk-sensorhub drivers.
+ *
+ * Only the vibrator needs base-tree changes: the vendor PWM node uses the
+ * downstream "mediatek,pwm" binding, which no 6.18 driver matches. The
+ * register layout (channels at 0x10, stride 0x40, four channels) and clock
+ * set are identical to MT8183, so bind pwm-mediatek with that data.
+ *
+ * NFC (qcom,nq-nci), fingerprint (mediatek,fpc1022_irq + spi5 child, bus
+ * fixups at the end of this file) and
+ * SCP (mediatek,scp) bind to the existing vendor nodes unchanged.
+ */
+
+&{/pwm@10048000} {
+	compatible = "mediatek,mt6853-pwm", "mediatek,mt8183-pwm";
+	#pwm-cells = <2>;
+	clocks = <&{/syson@10001000} 0x0e>, <&{/syson@10001000} 0x09>,
+		 <&{/syson@10001000} 0x0a>, <&{/syson@10001000} 0x0b>,
+		 <&{/syson@10001000} 0x0c>, <&{/syson@10001000} 0x0d>;
+	clock-names = "top", "main", "pwm1", "pwm2", "pwm3", "pwm4";
+	status = "okay";
+};
+
+/* AW8622 long-vibration carrier: PWM1 at center_freq (208 Hz) */
+&{/haptic_pwm} {
+	pwms = <&{/pwm@10048000} 0 4807692>;
+};
+
+/*
+ * Fingerprint bus. Stock left the spi5 pins (GPIO28 CLK, 29 CSB, 30 MO,
+ * 31 MI, all function 1) to the preloader; mux them explicitly, and give
+ * the sensor the 1 us chip-select setup/hold/idle the stock spi-mt65xx
+ * applied by default at its 1 MHz detection clock. Pulls match what the
+ * phone shows once the TEE has used the bus (CLK pull-down, MI pull-up),
+ * so a sensor that never drives MISO reads 0xff, not 0x00.
+ */
+&pio {
+	fp_spi5_pins: fp-spi5-pins {
+		pins-clk {
+			pinmux = <0x1c01>;
+			bias-pull-down;
+		};
+		pins-spi {
+			pinmux = <0x1d01>, <0x1e01>;
+			bias-disable;
+		};
+		pins-miso {
+			pinmux = <0x1f01>;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	/* GPIO mode for mtk-tee-fingerprint's bit-banged ID probe */
+	fp_spi5_gpio_pu: fp-spi5-gpio-pu {
+		pins-clk-mo {
+			pinmux = <0x1c00>, <0x1e00>;
+			output-low;
+		};
+		pins-cs {
+			pinmux = <0x1d00>;
+			output-high;
+		};
+		pins-miso {
+			pinmux = <0x1f00>;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	fp_spi5_gpio_pd: fp-spi5-gpio-pd {
+		pins-clk-mo {
+			pinmux = <0x1c00>, <0x1e00>;
+			output-low;
+		};
+		pins-cs {
+			pinmux = <0x1d00>;
+			output-high;
+		};
+		pins-miso {
+			pinmux = <0x1f00>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+&{/spi5@11019000} {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-names = "default", "fp-gpio-pu", "fp-gpio-pd";
+	pinctrl-0 = <&fp_spi5_pins>;
+	pinctrl-1 = <&fp_spi5_gpio_pu>;
+	pinctrl-2 = <&fp_spi5_gpio_pd>;
+
+	fingerprint@0 {
+		reg = <0>;
+		spi-cs-setup-delay-ns = <1000>;
+		spi-cs-hold-delay-ns = <1000>;
+		spi-cs-inactive-delay-ns = <1000>;
+	};
+};
+
+/* spi5 pins as GPIOs (CLK, CS, MO, MI) for the bit-banged ID probe only */
+&goodix_fp {
+	fp-spi-gpios = <&pio 28 0>, <&pio 29 0>, <&pio 30 0>, <&pio 31 0>;
+};

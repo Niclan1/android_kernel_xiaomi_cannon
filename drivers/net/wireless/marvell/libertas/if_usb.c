@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * This file contains functions used in USB interface module.
  */
@@ -113,8 +114,8 @@ static void if_usb_write_bulk_callback(struct urb *urb)
 static void if_usb_free(struct if_usb_card *cardp)
 {
 	/* Unlink tx & rx urb */
-	usb_kill_urb(cardp->tx_urb);
-	usb_kill_urb(cardp->rx_urb);
+	usb_kill_anchored_urbs(&cardp->tx_submitted);
+	usb_kill_anchored_urbs(&cardp->rx_submitted);
 
 	usb_free_urb(cardp->tx_urb);
 	cardp->tx_urb = NULL;
@@ -162,9 +163,9 @@ static void if_usb_setup_firmware(struct lbs_private *priv)
 	}
 }
 
-static void if_usb_fw_timeo(unsigned long priv)
+static void if_usb_fw_timeo(struct timer_list *t)
 {
-	struct if_usb_card *cardp = (void *)priv;
+	struct if_usb_card *cardp = timer_container_of(cardp, t, fw_timeout);
 
 	if (cardp->fwdnldover) {
 		lbs_deb_usb("Download complete, no event. Assuming success\n");
@@ -206,7 +207,7 @@ static int if_usb_probe(struct usb_interface *intf,
 	if (!cardp)
 		goto error;
 
-	setup_timer(&cardp->fw_timeout, if_usb_fw_timeo, (unsigned long)cardp);
+	timer_setup(&cardp->fw_timeout, if_usb_fw_timeo, 0);
 	init_waitqueue_head(&cardp->fw_wq);
 
 	cardp->udev = udev;
@@ -219,6 +220,9 @@ static int if_usb_probe(struct usb_interface *intf,
 		     udev->descriptor.bDeviceClass,
 		     udev->descriptor.bDeviceSubClass,
 		     udev->descriptor.bDeviceProtocol);
+
+	init_usb_anchor(&cardp->rx_submitted);
+	init_usb_anchor(&cardp->tx_submitted);
 
 	for (i = 0; i < iface_desc->desc.bNumEndpoints; ++i) {
 		endpoint = &iface_desc->endpoint[i].desc;
@@ -255,8 +259,11 @@ static int if_usb_probe(struct usb_interface *intf,
 		goto dealloc;
 	}
 
-	if (!(priv = lbs_add_card(cardp, &intf->dev)))
+	priv = lbs_add_card(cardp, &intf->dev);
+	if (IS_ERR(priv)) {
+		r = PTR_ERR(priv);
 		goto err_add_card;
+	}
 
 	cardp->priv = priv;
 
@@ -368,7 +375,7 @@ static int if_usb_send_fw_pkt(struct if_usb_card *cardp)
 			     cardp->fwseqnum, cardp->totalbytes);
 	} else if (fwdata->hdr.dnldcmd == cpu_to_le32(FW_HAS_LAST_BLOCK)) {
 		lbs_deb_usb2(&cardp->udev->dev, "Host has finished FW downloading\n");
-		lbs_deb_usb2(&cardp->udev->dev, "Donwloading FW JUMP BLOCK\n");
+		lbs_deb_usb2(&cardp->udev->dev, "Downloading FW JUMP BLOCK\n");
 
 		cardp->fwfinalblk = 1;
 	}
@@ -422,6 +429,13 @@ static int usb_tx_block(struct if_usb_card *cardp, uint8_t *payload, uint16_t nb
 		goto tx_ret;
 	}
 
+	/* check if there are pending URBs */
+	if (!usb_anchor_empty(&cardp->tx_submitted)) {
+		lbs_deb_usbd(&cardp->udev->dev, "%s failed: pending URB\n", __func__);
+		ret = -EBUSY;
+		goto tx_ret;
+	}
+
 	usb_fill_bulk_urb(cardp->tx_urb, cardp->udev,
 			  usb_sndbulkpipe(cardp->udev,
 					  cardp->ep_out),
@@ -429,8 +443,10 @@ static int usb_tx_block(struct if_usb_card *cardp, uint8_t *payload, uint16_t nb
 
 	cardp->tx_urb->transfer_flags |= URB_ZERO_PACKET;
 
+	usb_anchor_urb(cardp->tx_urb, &cardp->tx_submitted);
 	if ((ret = usb_submit_urb(cardp->tx_urb, GFP_ATOMIC))) {
 		lbs_deb_usbd(&cardp->udev->dev, "usb_submit_urb failed: %d\n", ret);
+		usb_unanchor_urb(cardp->tx_urb);
 	} else {
 		lbs_deb_usb2(&cardp->udev->dev, "usb_submit_urb success\n");
 		ret = 0;
@@ -461,8 +477,10 @@ static int __if_usb_submit_rx_urb(struct if_usb_card *cardp,
 			  cardp);
 
 	lbs_deb_usb2(&cardp->udev->dev, "Pointer for rx_urb %p\n", cardp->rx_urb);
+	usb_anchor_urb(cardp->rx_urb, &cardp->rx_submitted);
 	if ((ret = usb_submit_urb(cardp->rx_urb, GFP_ATOMIC))) {
 		lbs_deb_usbd(&cardp->udev->dev, "Submit Rx URB failed: %d\n", ret);
+		usb_unanchor_urb(cardp->rx_urb);
 		kfree_skb(skb);
 		cardp->rx_skb = NULL;
 		ret = -1;
@@ -616,6 +634,7 @@ static inline void process_cmdrequest(int recvlength, uint8_t *recvbuff,
 				      struct if_usb_card *cardp,
 				      struct lbs_private *priv)
 {
+	unsigned long flags;
 	u8 i;
 
 	if (recvlength > LBS_CMD_BUFFER_SIZE) {
@@ -625,19 +644,17 @@ static inline void process_cmdrequest(int recvlength, uint8_t *recvbuff,
 		return;
 	}
 
-	BUG_ON(!in_interrupt());
-
-	spin_lock(&priv->driver_lock);
+	spin_lock_irqsave(&priv->driver_lock, flags);
 
 	i = (priv->resp_idx == 0) ? 1 : 0;
 	BUG_ON(priv->resp_len[i]);
 	priv->resp_len[i] = (recvlength - MESSAGE_HEADER_LEN);
 	memcpy(priv->resp_buf[i], recvbuff + MESSAGE_HEADER_LEN,
 		priv->resp_len[i]);
-	kfree_skb(skb);
+	dev_kfree_skb_irq(skb);
 	lbs_notify_command_response(priv, i);
 
-	spin_unlock(&priv->driver_lock);
+	spin_unlock_irqrestore(&priv->driver_lock, flags);
 
 	lbs_deb_usbd(&cardp->udev->dev,
 		    "Wake up main thread to handle cmd response\n");
@@ -833,8 +850,8 @@ static void if_usb_prog_firmware(struct lbs_private *priv, int ret,
 	}
 
 	/* Cancel any pending usb business */
-	usb_kill_urb(cardp->rx_urb);
-	usb_kill_urb(cardp->tx_urb);
+	usb_kill_anchored_urbs(&cardp->rx_submitted);
+	usb_kill_anchored_urbs(&cardp->tx_submitted);
 
 	cardp->fwlastblksent = 0;
 	cardp->fwdnldover = 0;
@@ -864,8 +881,8 @@ restart:
 	if (cardp->bootcmdresp == BOOT_CMD_RESP_NOT_SUPPORTED) {
 		/* Return to normal operation */
 		ret = -EOPNOTSUPP;
-		usb_kill_urb(cardp->rx_urb);
-		usb_kill_urb(cardp->tx_urb);
+		usb_kill_anchored_urbs(&cardp->rx_submitted);
+		usb_kill_anchored_urbs(&cardp->tx_submitted);
 		if (if_usb_submit_rx_urb(cardp) < 0)
 			ret = -EIO;
 		goto done;
@@ -894,8 +911,8 @@ restart:
 	/* ... and wait for the process to complete */
 	wait_event_interruptible(cardp->fw_wq, cardp->surprise_removed || cardp->fwdnldover);
 
-	del_timer_sync(&cardp->fw_timeout);
-	usb_kill_urb(cardp->rx_urb);
+	timer_delete_sync(&cardp->fw_timeout);
+	usb_kill_anchored_urbs(&cardp->rx_submitted);
 
 	if (!cardp->fwdnldover) {
 		pr_info("failed to load fw, resetting device!\n");
@@ -955,8 +972,8 @@ static int if_usb_suspend(struct usb_interface *intf, pm_message_t message)
 		goto out;
 
 	/* Unlink tx & rx urb */
-	usb_kill_urb(cardp->tx_urb);
-	usb_kill_urb(cardp->rx_urb);
+	usb_kill_anchored_urbs(&cardp->tx_submitted);
+	usb_kill_anchored_urbs(&cardp->rx_submitted);
 
  out:
 	return ret;

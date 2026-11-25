@@ -1,11 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Platform data for Arizona devices
  *
  * Copyright 2012 Wolfson Microelectronics. PLC.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 
 #ifndef _ARIZONA_PDATA_H
@@ -56,6 +53,7 @@
 #define ARIZONA_MAX_PDM_SPK 2
 
 struct regulator_init_data;
+struct gpio_desc;
 
 struct arizona_micbias {
 	int mV;                    /** Regulated voltage */
@@ -77,7 +75,7 @@ struct arizona_micd_range {
 };
 
 struct arizona_pdata {
-	int reset;      /** GPIO controlling /RESET, if any */
+	struct gpio_desc *reset;      /** GPIO controlling /RESET, if any */
 
 	/** Regulator configuration for MICVDD */
 	struct arizona_micsupp_pdata micvdd;
@@ -119,8 +117,10 @@ struct arizona_pdata {
 	/** Check for line output with HPDET method */
 	bool hpdet_acc_id_line;
 
+#ifdef CONFIG_GPIOLIB_LEGACY
 	/** GPIO used for mic isolation with HPDET */
 	int hpdet_id_gpio;
+#endif
 
 	/** Channel to use for headphone detection */
 	unsigned int hpdet_channel;
@@ -131,8 +131,10 @@ struct arizona_pdata {
 	/** Extra debounce timeout used during initial mic detection (ms) */
 	unsigned int micd_detect_debounce;
 
+#ifdef CONFIG_GPIOLIB_LEGACY
 	/** GPIO for mic detection polarity */
 	int micd_pol_gpio;
+#endif
 
 	/** Mic detect ramp rate */
 	unsigned int micd_bias_start_time;
@@ -174,6 +176,9 @@ struct arizona_pdata {
 	/** Mode for outputs */
 	int out_mono[ARIZONA_MAX_OUTPUT];
 
+	/** Limit output volumes */
+	unsigned int out_vol_limit[2 * ARIZONA_MAX_OUTPUT];
+
 	/** PDM speaker mute setting */
 	unsigned int spk_mute[ARIZONA_MAX_PDM_SPK];
 
@@ -183,8 +188,10 @@ struct arizona_pdata {
 	/** Haptic actuator type */
 	unsigned int hap_act;
 
+#ifdef CONFIG_GPIOLIB_LEGACY
 	/** GPIO for primary IRQ (used for edge triggered emulation) */
 	int irq_gpio;
+#endif
 
 	/** General purpose switch control */
 	unsigned int gpsw;

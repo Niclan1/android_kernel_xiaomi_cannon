@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
  * (C) 2001 Clemson University and The University of Chicago
  *
@@ -30,10 +31,12 @@ static ulong module_parm_debug_mask;
 __u64 orangefs_gossip_debug_mask;
 int op_timeout_secs = ORANGEFS_DEFAULT_OP_TIMEOUT_SECS;
 int slot_timeout_secs = ORANGEFS_DEFAULT_SLOT_TIMEOUT_SECS;
+int orangefs_cache_timeout_msecs = 500;
 int orangefs_dcache_timeout_msecs = 50;
 int orangefs_getattr_timeout_msecs = 50;
 
 MODULE_LICENSE("GPL");
+MODULE_IMPORT_NS("ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
 MODULE_AUTHOR("ORANGEFS Development Team");
 MODULE_DESCRIPTION("The Linux Kernel VFS interface to ORANGEFS");
 MODULE_PARM_DESC(module_parm_debug_mask, "debugging level (see orangefs-debug.h for values)");
@@ -44,7 +47,8 @@ MODULE_PARM_DESC(hash_table_size,
 
 static struct file_system_type orangefs_fs_type = {
 	.name = "pvfs2",
-	.mount = orangefs_mount,
+	.init_fs_context = orangefs_init_fs_context,
+	.parameters = orangefs_fs_param_spec,
 	.kill_sb = orangefs_kill_sb,
 	.owner = THIS_MODULE,
 };
@@ -77,7 +81,7 @@ DECLARE_WAIT_QUEUE_HEAD(orangefs_request_list_waitq);
 
 static int __init orangefs_init(void)
 {
-	int ret = -1;
+	int ret;
 	__u32 i = 0;
 
 	if (op_timeout_secs < 0)
@@ -127,9 +131,7 @@ static int __init orangefs_init(void)
 	if (ret)
 		goto cleanup_key_table;
 
-	ret = orangefs_debugfs_init(module_parm_debug_mask);
-	if (ret)
-		goto debugfs_init_failed;
+	orangefs_debugfs_init(module_parm_debug_mask);
 
 	ret = orangefs_sysfs_init();
 	if (ret)
@@ -149,7 +151,6 @@ static int __init orangefs_init(void)
 		pr_info("%s: module version %s loaded\n",
 			__func__,
 			ORANGEFS_VERSION);
-		ret = 0;
 		goto out;
 	}
 
@@ -159,8 +160,6 @@ cleanup_sysfs:
 	orangefs_sysfs_exit();
 
 sysfs_init_failed:
-
-debugfs_init_failed:
 	orangefs_debugfs_cleanup();
 
 cleanup_key_table:

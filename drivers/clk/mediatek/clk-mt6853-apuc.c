@@ -1,17 +1,10 @@
-/*
- * Copyright (c) 2020 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- */
+// SPDX-License-Identifier: GPL-2.0
+//
+// Copyright (c) 2020 MediaTek Inc.
+// Author: Owen Chen <owen.chen@mediatek.com>
 
 #include <linux/clk-provider.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 
 #include "clk-mtk.h"
@@ -25,8 +18,7 @@
 
 #define INV_OFS			-1
 
-/* get spm power status struct to register inside clk_data */
-static struct pwr_status pwr_stat = GATE_PWR_STAT(INV_OFS,
+static const struct mtk_gate_power_status pwr_stat = GATE_PWR_STAT(INV_OFS,
 		INV_OFS, 0x0178, BIT(5), BIT(5));
 
 static const struct mtk_gate_regs apuc_cg_regs = {
@@ -84,7 +76,7 @@ static const struct mtk_gate apuc_clks[] = {
 
 static int clk_mt6853_apuc_probe(struct platform_device *pdev)
 {
-	struct clk_onecell_data *clk_data;
+	struct clk_hw_onecell_data *clk_data;
 	int r;
 	struct device_node *node = pdev->dev.of_node;
 
@@ -94,10 +86,14 @@ static int clk_mt6853_apuc_probe(struct platform_device *pdev)
 
 	clk_data = mtk_alloc_clk_data(CLK_APUC_NR_CLK);
 
-	mtk_clk_register_gates(node, apuc_clks, ARRAY_SIZE(apuc_clks),
+	r = mtk_clk_register_gates(&pdev->dev, node, apuc_clks, ARRAY_SIZE(apuc_clks),
 			clk_data);
+	if (r) {
+		mtk_free_clk_data(clk_data);
+		return r;
+	}
 
-	r = of_clk_add_provider(node, of_clk_src_onecell_get, clk_data);
+	r = of_clk_add_hw_provider(node, of_clk_hw_onecell_get, clk_data);
 
 	if (r)
 		pr_err("%s(): could not register clock provider: %d\n",
@@ -136,10 +132,18 @@ static struct platform_driver clk_mt6853_apuc_drv = {
 		.of_match_table = of_match_clk_mt6853_apuc,
 	},
 };
-static int __init clk_mt6853_apuc_platform_init(void)
+
+static int __init clk_mt6853_apuc_init(void)
 {
 	return platform_driver_register(&clk_mt6853_apuc_drv);
 }
-arch_initcall(clk_mt6853_apuc_platform_init);
 
+static void __exit clk_mt6853_apuc_exit(void)
+{
+	platform_driver_unregister(&clk_mt6853_apuc_drv);
+}
+
+arch_initcall(clk_mt6853_apuc_init);
+module_exit(clk_mt6853_apuc_exit);
+MODULE_LICENSE("GPL");
 #endif	/* MT_CLKMGR_MODULE_INIT */

@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * cls_cgroup.h			Control Group Classifier
  *
  * Authors:	Thomas Graf <tgraf@suug.ch>
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of the GNU General Public License as published by the Free
- * Software Foundation; either version 2 of the License, or (at your option)
- * any later version.
- *
  */
 
 #ifndef _NET_CLS_CGROUP_H
@@ -24,6 +19,8 @@ struct cgroup_cls_state {
 	struct cgroup_subsys_state css;
 	u32 classid;
 };
+
+void _trace_android_vh_task_get_classid(const struct sk_buff *skb, u32 *classid);
 
 struct cgroup_cls_state *task_cls_state(struct task_struct *p);
 
@@ -68,7 +65,7 @@ static inline u32 task_get_classid(const struct sk_buff *skb)
 	 * calls by looking at the number of nested bh disable calls because
 	 * softirqs always disables bh.
 	 */
-	if (in_serving_softirq()) {
+	if (softirq_count()) {
 		struct sock *sk = skb_to_full_sk(skb);
 
 		/* If there is an sock_cgroup_classid we'll use that. */
@@ -77,6 +74,8 @@ static inline u32 task_get_classid(const struct sk_buff *skb)
 
 		classid = sock_cgroup_classid(&sk->sk_cgrp_data);
 	}
+
+	_trace_android_vh_task_get_classid(skb, &classid);
 
 	return classid;
 }

@@ -1,14 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * u_ether.h -- interface to USB gadget "ethernet link" utilities
  *
  * Copyright (C) 2003-2005,2008 David Brownell
  * Copyright (C) 2003-2004 Robert Schwebel, Benedikt Spranger
  * Copyright (C) 2008 Nokia Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
  */
 
 #ifndef __U_ETHER_H
@@ -20,7 +16,7 @@
 #include <linux/usb/cdc.h>
 #include <linux/netdevice.h>
 
-#define QMULT_DEFAULT 30
+#define QMULT_DEFAULT 5
 
 /*
  * dev_addr: initial value
@@ -29,63 +25,18 @@
  */
 #define USB_ETHERNET_MODULE_PARAMETERS() \
 	static unsigned qmult = QMULT_DEFAULT;				\
-	module_param(qmult, uint, 0644);			\
+	module_param(qmult, uint, S_IRUGO|S_IWUSR);			\
 	MODULE_PARM_DESC(qmult, "queue length multiplier at high/super speed");\
 									\
 	static char *dev_addr;						\
-	module_param(dev_addr, charp, 0644);				\
+	module_param(dev_addr, charp, S_IRUGO);				\
 	MODULE_PARM_DESC(dev_addr, "Device Ethernet Address");		\
 									\
 	static char *host_addr;						\
-	module_param(host_addr, charp, 0644);			\
+	module_param(host_addr, charp, S_IRUGO);			\
 	MODULE_PARM_DESC(host_addr, "Host Ethernet Address")
 
-struct eth_dev {
-	/* lock is held while accessing port_usb
-	 */
-	spinlock_t		lock;
-	struct gether		*port_usb;
-
-	struct net_device	*net;
-	struct usb_gadget	*gadget;
-
-	spinlock_t		req_lock;	/* guard {tx}_reqs */
-	spinlock_t		reqrx_lock;	/* guard {rx}_reqs */
-	struct list_head	tx_reqs, rx_reqs;
-	atomic_t		tx_qlen;
-/* Minimum number of TX USB request queued to UDC */
-#define TX_REQ_THRESHOLD	5
-	int			no_tx_req_used;
-	int			tx_skb_hold_count;
-	u32			tx_req_bufsize;
-
-	struct sk_buff_head	rx_frames;
-
-	unsigned int		qmult;
-
-	unsigned int		header_len;
-	unsigned int		ul_max_pkts_per_xfer;
-	unsigned int		dl_max_pkts_per_xfer;
-
-	uint32_t		dl_max_xfer_size;
-
-	struct sk_buff		*(*wrap)(struct gether *link,
-			struct sk_buff *skb);
-	int			(*unwrap)(struct gether *link,
-						struct sk_buff *skb,
-						struct sk_buff_head *list);
-
-	struct work_struct	work;
-	struct work_struct	rx_work;
-	struct work_struct	rx_work1;
-	unsigned long		todo;
-#define	WORK_RX_MEMORY		0
-
-	bool			zlp;
-	bool			ifname_set;
-	u8			host_mac[ETH_ALEN];
-	u8			dev_mac[ETH_ALEN];
-};
+struct eth_dev;
 
 /*
  * This represents the USB side of an "ethernet" link, managed by a USB
@@ -118,10 +69,6 @@ struct gether {
 	bool				is_fixed;
 	u32				fixed_out_len;
 	u32				fixed_in_len;
-	unsigned int		ul_max_pkts_per_xfer;
-	unsigned int		dl_max_pkts_per_xfer;
-	unsigned int		dl_max_transfer_len;
-	bool				multi_pkt_xfer;
 	bool				supports_multi_frame;
 	struct sk_buff			*(*wrap)(struct gether *port,
 						struct sk_buff *skb);
@@ -132,7 +79,7 @@ struct gether {
 	/* called on network open/close */
 	void				(*open)(struct gether *);
 	void				(*close)(struct gether *);
-	struct rndis_packet_msg_type	*header;
+	bool				is_suspend;
 };
 
 #define	DEFAULT_FILTER	(USB_CDC_PACKET_TYPE_BROADCAST \
@@ -202,6 +149,32 @@ static inline struct net_device *gether_setup_default(void)
  * This associates one ethernet-over-usb link with a gadget.
  */
 void gether_set_gadget(struct net_device *net, struct usb_gadget *g);
+
+/**
+ * gether_attach_gadget - Reparent net_device to the gadget device.
+ * @net: The network device to reparent.
+ * @g: The target USB gadget device to parent to.
+ *
+ * This function moves the network device to be a child of the USB gadget
+ * device in the device hierarchy. This is typically done when the function
+ * is bound to a configuration.
+ *
+ * Returns 0 on success, or a negative error code on failure.
+ */
+int gether_attach_gadget(struct net_device *net, struct usb_gadget *g);
+
+/**
+ * gether_detach_gadget - Detach net_device from its gadget parent.
+ * @net: The network device to detach.
+ *
+ * This function moves the network device to be a child of the virtual
+ * devices parent, effectively detaching it from the USB gadget device
+ * hierarchy. This is typically done when the function is unbound
+ * from a configuration but the instance is not yet freed.
+ */
+void gether_detach_gadget(struct net_device *net);
+
+DEFINE_FREE(detach_gadget, struct net_device *, if (_T) gether_detach_gadget(_T))
 
 /**
  * gether_set_dev_addr - initialize an ethernet-over-usb link with eth address
@@ -312,10 +285,12 @@ int gether_set_ifname(struct net_device *net, const char *name, int len);
 
 void gether_cleanup(struct eth_dev *dev);
 
+void gether_suspend(struct gether *link);
+void gether_resume(struct gether *link);
+
 /* connect/disconnect is handled by individual functions */
 struct net_device *gether_connect(struct gether *);
 void gether_disconnect(struct gether *);
-void gether_update_dl_max_xfer_size(struct gether *link, uint32_t s);
 
 /* Some controllers can't support CDC Ethernet (ECM) ... */
 static inline bool can_support_ecm(struct usb_gadget *gadget)
@@ -330,23 +305,17 @@ static inline bool can_support_ecm(struct usb_gadget *gadget)
 	return true;
 }
 
-extern unsigned int rndis_test_last_resp_id;
-extern unsigned int rndis_test_last_msg_id;
-
-extern unsigned long rndis_test_reset_msg_cnt;
-
-extern unsigned long rndis_test_rx_usb_in;
-extern unsigned long rndis_test_rx_net_out;
-extern unsigned long rndis_test_rx_nomem;
-extern unsigned long rndis_test_rx_error;
-
-extern unsigned long rndis_test_tx_net_in;
-extern unsigned long rndis_test_tx_busy;
-extern unsigned long rndis_test_tx_stop;
-
-extern unsigned long rndis_test_tx_usb_out;
-extern unsigned long rndis_test_tx_complete;
-
-extern void rx_fill(struct eth_dev *dev, gfp_t gfp_flags);
+/* peak (theoretical) bulk transfer rate in bits-per-second */
+static inline unsigned int gether_bitrate(struct usb_gadget *g)
+{
+	if (g->speed >= USB_SPEED_SUPER_PLUS)
+		return 4250000000U;
+	if (g->speed == USB_SPEED_SUPER)
+		return 3750000000U;
+	else if (g->speed == USB_SPEED_HIGH)
+		return 13 * 512 * 8 * 1000 * 8;
+	else
+		return 19 * 64 * 1 * 1000 * 8;
+}
 
 #endif /* __U_ETHER_H */

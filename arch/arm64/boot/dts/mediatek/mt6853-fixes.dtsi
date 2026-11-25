@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: GPL-2.0
+#include <dt-bindings/memory/mt6853-larb-port.h>
+#include <dt-bindings/power/mt6853-power.h>
+#include <dt-bindings/clock/mt6853-clk.h>
+
+/*
+ * Small devicetree corrections on top of mt6853.dts, found by reading the
+ * boot logs against the drivers' devicetree parsing code.
+ */
+
+/*
+ * The mt6359-sound MFD cell (compatible "mediatek,mt6359-codec") needs an
+ * "audio-codec" child of the PMIC node, otherwise mt6359_parse_dt() returns
+ * -EINVAL and the sound card defers forever.
+ */
+&main_pmic {
+	mt6359codec: audio-codec {
+		compatible = "mediatek,mt6359-codec";
+	};
+};
+
+/* The card links to the codec component, which is the MFD child above. */
+&sound {
+	mediatek,audio-codec = <&mt6359codec>;
+};
+
+/* mtk_audio_sram_init() reads the hyphenated names, the stock DT has underscores. */
+&{/audio_sram@11212000} {
+	prefer-mode = <0>;
+	mode-size = <0x12000 0x18000>;
+	block-size = <0x1000>;
+};
+
+/*
+ * The mt6359-rtc MFD cell looks for a child compatible with
+ * "mediatek,mt6358-rtc" (same layout, RTC_BBPU at 0x588 and RTC irq 64 on
+ * both PMICs). The stock compatible matches no cell, so the device is created
+ * without an of_node ("Failed to locate of_node") and no wall clock exists.
+ */
+&mt6359_rtc {
+	compatible = "mediatek,mt6358-rtc";
+};
+
+/* Without a supply the PMIC rail is only kept alive by regulator_ignore_unused. */
+&mtu3_0 {
+	vusb33-supply = <&mt_pmic_vusb_ldo_reg>;
+};
+
+/*
+ * Both venc nodes map to the platform device "17020000.venc" and the second
+ * one fails with a sysfs duplicate-filename trace. This one is a vendor stub
+ * without a driver; "venc@17000000" keeps the real description.
+ */
+&{/venc@17020000} {
+	status = "disabled";
+};
+
+/*
+ * larb7 listed the venc and jpgenc gates as its apb/smi clocks, so its own
+ * LARB and GALS gates were never ungated and the first larb7 resume (venc
+ * encode) wrote larb registers behind a gated clock, hanging the bus.
+ */
+&smi_larb7 {
+	clocks = <&venc_gcon_clk CLK_VENC_CKE0_LARB>,
+		 <&venc_gcon_clk CLK_VENC_CKE1_VENC>,
+		 <&venc_gcon_clk CLK_VENC_CKE5_GALS>;
+	clock-names = "apb", "smi", "gals0";
+};
+
+/* The codec uses all nine encoder ports, not just RD_COMV. */
+&{/venc@17000000} {
+	power-domains = <&scpsys MT6853_POWER_DOMAIN_VENC>;
+	iommus = <&{/m4u@14016000} M4U_PORT_L7_VENC_RCPU>,
+		 <&{/m4u@14016000} M4U_PORT_L7_VENC_REC>,
+		 <&{/m4u@14016000} M4U_PORT_L7_VENC_BSDMA>,
+		 <&{/m4u@14016000} M4U_PORT_L7_VENC_SV_COMV>,
+		 <&{/m4u@14016000} M4U_PORT_L7_VENC_RD_COMV>,
+		 <&{/m4u@14016000} M4U_PORT_L7_VENC_CUR_LUMA>,
+		 <&{/m4u@14016000} M4U_PORT_L7_VENC_CUR_CHROMA>,
+		 <&{/m4u@14016000} M4U_PORT_L7_VENC_REF_LUMA>,
+		 <&{/m4u@14016000} M4U_PORT_L7_VENC_REF_CHROMA>;
+};
+
+&reserved_memory {
+	vcu_trace_mem: vcu-trace@5ff00000 {
+		reg = <0x00 0x5ff00000 0x00 0x4000>;
+		no-map;
+	};
+};
+
+&vcu {
+	memory-region = <&vcu_trace_mem>;
+};

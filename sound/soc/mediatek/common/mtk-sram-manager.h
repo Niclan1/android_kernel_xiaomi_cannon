@@ -1,8 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * mtk-sram-manager.h  --  Mediatek afe sram manager
- *
- * Copyright (c) 2017 MediaTek Inc.
+ * Copyright (c) 2019 MediaTek Inc.
  * Author: Kai Chieh Chuang <kaichieh.chuang@mediatek.com>
  */
 
@@ -54,7 +52,8 @@ int mtk_audio_sram_init(struct device *dev,
 int mtk_audio_sram_allocate(struct mtk_audio_sram *sram,
 			    dma_addr_t *phys_addr, unsigned char **virt_addr,
 			    unsigned int size, void *user,
-			    snd_pcm_format_t format, bool force_normal);
+			    snd_pcm_format_t format, bool force_normal,
+			    bool force_end_alloc);
 int mtk_audio_sram_free(struct mtk_audio_sram *sram, void *user);
 
 unsigned int mtk_audio_sram_get_size(struct mtk_audio_sram *sram, int mode);

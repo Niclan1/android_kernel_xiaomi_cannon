@@ -13,12 +13,12 @@
 struct idset {
 	int num_ssid;
 	int num_id;
-	unsigned long bitmap[0];
+	unsigned long bitmap[];
 };
 
 static inline unsigned long idset_bitmap_size(int num_ssid, int num_id)
 {
-	return BITS_TO_LONGS(num_ssid * num_id) * sizeof(unsigned long);
+	return bitmap_size(size_mul(num_ssid, num_id));
 }
 
 static struct idset *idset_new(int num_ssid, int num_id)
@@ -59,18 +59,6 @@ static inline void idset_del(struct idset *set, int ssid, int id)
 static inline int idset_contains(struct idset *set, int ssid, int id)
 {
 	return test_bit(ssid * set->num_id + id, set->bitmap);
-}
-
-static inline int idset_get_first(struct idset *set, int *ssid, int *id)
-{
-	int bitnum;
-
-	bitnum = find_first_bit(set->bitmap, set->num_ssid * set->num_id);
-	if (bitnum >= set->num_ssid * set->num_id)
-		return 0;
-	*ssid = bitnum / set->num_id;
-	*id = bitnum % set->num_id;
-	return 1;
 }
 
 struct idset *idset_sch_new(void)

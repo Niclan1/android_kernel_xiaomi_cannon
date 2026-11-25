@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Connectivity subsystem (consys) hookups for the MT6853 WMT driver in
+ * drivers/misc/mtk-consys/wmt (CONFIG_MTK_CONSYS_WMT, mtk_consys.hw=1).
+ * Included from mt6853.dts; nothing here is used while mtk_consys.hw=0.
+ */
+
+&consys {
+	/* 4 MiB firmware/coredump window shared with the CONN MCU */
+	memory-region = <&{/reserved-memory/consys-reserve-memory}>;
+
+	/* PMIC whose regmap is used for the VCN LDO low-power settings */
+	pmic = <&main_pmic>;
+
+	vcn18-supply = <&mt_pmic_vcn18_ldo_reg>;
+	vcn13-supply = <&mt_pmic_vcn13_ldo_reg>;
+	vcn33_1_bt-supply = <&mt_pmic_vcn33_1_bt_ldo_reg>;
+	vcn33_1_wifi-supply = <&mt_pmic_vcn33_1_wifi_ldo_reg>;
+	vcn33_2_wifi-supply = <&mt_pmic_vcn33_2_wifi_ldo_reg>;
+};

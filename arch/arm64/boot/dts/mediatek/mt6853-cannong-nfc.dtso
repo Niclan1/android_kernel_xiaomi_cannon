@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/clock/mt6853-clk.h>
+#include <dt-bindings/pinctrl/mt6853-pinfunc.h>
+
+&i2c3 {
+	compatible = "mediatek,mt6853-i2c";
+	clocks = <&imp_iic_wrap_e_clk CLK_IMPE_AP_CLOCK_RO_I2C3>,
+		 <&infracfg_ao_clk CLK_IFRAO_AP_DMA>;
+	clock-names = "main", "dma";
+	pinctrl-names = "default";
+	pinctrl-0 = <&nfc_i2c_pins>;
+};
+
+&pio {
+	nfc_i2c_pins: nfc-i2c-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO103__FUNC_SCL3>,
+				 <PINMUX_GPIO104__FUNC_SDA3>;
+			input-enable;
+		};
+	};
+};

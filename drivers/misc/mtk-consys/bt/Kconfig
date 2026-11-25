@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTK_CONSYS_BT
+	bool "MediaTek MT6853 consys Bluetooth (/dev/stpbt)"
+	depends on MTK_CONSYS_WMT
+	default n
+	help
+	  The /dev/stpbt character device used by the vendor Bluetooth HAL:
+	  H4 HCI packets carried over the WMT/STP core. The chip is powered
+	  and the Bluetooth firmware is started when the node is opened and
+	  powered down again on the last close. Nothing happens at boot, and
+	  nothing at all unless the kernel command line has mtk_consys.hw=1.
+
+	  The node is only created once the vendor wmt_loader has initialised
+	  the connectivity drivers. mtk_stpbt.enable=0 on the kernel command
+	  line keeps the node from being created.
+
+	  If unsure, say N.

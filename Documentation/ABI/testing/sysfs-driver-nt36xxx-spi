@@ -1,0 +1,10 @@
+What:		/sys/touchpanel/double_tap
+Date:		November 2026
+Contact:	Linux input mailing list <linux-input@vger.kernel.org>
+Description:
+		Enable (1) or disable (0) double-tap-to-wake. Defaults to 0.
+		The value is latched at the next panel blank or system suspend.
+		Gesture mode retains panel bias/reset and reports KEY_WAKEUP for
+		Novatek double-click packets. Other gestures are ignored.
+		The SPI device's power/wakeup must also be enabled.
+		This is the interface used by the cannon Lineage power HAL.

@@ -70,7 +70,7 @@ extern int scp_release_semaphore_3way(int flag) __attribute__((weak));
 	})
 #else
 #define AUDREG_SEMA_3WAY_GET(is_scp_sema_support) (-1)
-#define AUDREG_SEMA_3WAY_RELEASE(is_scp_sema_support) (-1)
+#define AUDREG_SEMA_3WAY_RELEASE(is_scp_sema_support) do { } while (0)
 #endif
 
 bool mtk_get_speech_status(void);

@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Mali-G57 MC3 additions on top of mt6853.dts for mainline Panfrost.
+ *
+ * Panfrost registers a devfreq cooling device. A thermal zone can only
+ * reference it as <&mali ...> when the node has #cooling-cells, and the energy
+ * model (needed by the power_allocator governor) is built from
+ * dynamic-power-coefficient. The frequencies stay as described in
+ * mt6853.dts; only the two lowest OPP voltages are raised, see below.
+ */
+
+&mali {
+	#cooling-cells = <2>;
+
+	/*
+	 * 4.14 gpufreq reference point GPU_ACT_REF_POWER: 1133 mW at 950 MHz and
+	 * 0.80 V, so 1133000 / (950 * 0.8 * 0.8) = ~1863 uW/MHz/V^2.
+	 */
+	dynamic-power-coefficient = <1863>;
+};
+
+/*
+ * The 4.14 gpufreq driver picks one of three OPP voltage tables from efuse
+ * (devinfo word 134, bits [3:2]; mtk_gpufreq_internal_plat.h). They only
+ * differ at the two lowest OPPs: 390 MHz is 575/600/625 mV and 515 MHz is
+ * 612.5/625/637.5 mV. mt6853.dts carries the first table, so use the
+ * highest pair (still a vendor pair) instead of risking an undervolted
+ * GPU on a unit whose efuse selects another table.
+ */
+&gpu_opp_table {
+	opp-390000000 {
+		opp-microvolt = <625000>;
+	};
+
+	opp-515000000 {
+		opp-microvolt = <637500>;
+	};
+};

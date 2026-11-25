@@ -49,45 +49,24 @@
 			__VA_ARGS__, { } },				\
 	}
 
-#define PINCTRL_PIN_GROUP(name, id)			\
-	{						\
-		name,					\
-		id##_pins,				\
-		ARRAY_SIZE(id##_pins),			\
-		id##_funcs,				\
+#define MTK_EINT_PIN(_number, _instance, _index, _debounce) {	\
+		.number = _number,				\
+		.instance = _instance,				\
+		.index = _index,				\
+		.debounce = _debounce,				\
 	}
 
-int mtk_paris_pinctrl_probe(struct platform_device *pdev,
-			    const struct mtk_pin_soc *soc);
+#define PINCTRL_PIN_GROUP(_name_, id)							\
+	{										\
+		.grp = PINCTRL_PINGROUP(_name_,id##_pins, ARRAY_SIZE(id##_pins)),	\
+		.data = id##_funcs,							\
+	}
 
-int mtk_hw_get_value_wrap(struct mtk_pinctrl *hw, unsigned int gpio, int field);
-
-#define mtk_pctrl_get_pinmux(hw, gpio)			\
-	mtk_hw_get_value_wrap(hw, gpio, PINCTRL_PIN_REG_MODE)
-
-/* MTK HW use 0 as input, 1 for output
- * This interface is for get direct register value,
- * so don't reverse
- */
-#define mtk_pctrl_get_direction(hw, gpio)		\
-	mtk_hw_get_value_wrap(hw, gpio, PINCTRL_PIN_REG_DIR)
-
-#define mtk_pctrl_get_out(hw, gpio)			\
-	mtk_hw_get_value_wrap(hw, gpio, PINCTRL_PIN_REG_DO)
-
-#define mtk_pctrl_get_in(hw, gpio)			\
-	mtk_hw_get_value_wrap(hw, gpio, PINCTRL_PIN_REG_DI)
-
-#define mtk_pctrl_get_smt(hw, gpio)			\
-	mtk_hw_get_value_wrap(hw, gpio, PINCTRL_PIN_REG_SMT)
-
-#define mtk_pctrl_get_ies(hw, gpio)			\
-	mtk_hw_get_value_wrap(hw, gpio, PINCTRL_PIN_REG_IES)
-
-#define mtk_pctrl_get_driving(hw, gpio)			\
-	mtk_hw_get_value_wrap(hw, gpio, PINCTRL_PIN_REG_DRV)
+int mtk_paris_pinctrl_probe(struct platform_device *pdev);
 
 ssize_t mtk_pctrl_show_one_pin(struct mtk_pinctrl *hw,
 	unsigned int gpio, char *buf, unsigned int bufLen);
+
+extern const struct dev_pm_ops mtk_paris_pinctrl_pm_ops;
 
 #endif /* __PINCTRL_PARIS_H */

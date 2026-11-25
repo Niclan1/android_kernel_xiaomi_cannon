@@ -1,0 +1,291 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/phy/phy.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/usb/pd.h>
+
+&{/} {
+	/* Prevent LK's legacy controller from being imported over the same IP. */
+	mtu3_0@11200000 {
+		status = "disabled";
+	};
+};
+
+&i2c7 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	lm36273: backlight@11 {
+		compatible = "mediatek,i2c_lcd_bias", "ti,lm36273";
+		reg = <0x11>;
+
+		panel_bias: bias {
+			regulator-name = "panel-bias";
+			regulator-min-microvolt = <5500000>;
+			regulator-max-microvolt = <5500000>;
+		};
+	};
+};
+
+&dsi0 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	cannong_panel: panel@0 {
+		compatible = "j22_42_02_0a,vdo";
+		reg = <0>;
+		reset-gpios = <&pio 86 0>;
+		bias-gpios = <&pio 137 0>, <&pio 138 0>;
+		bias-supply = <&panel_bias>;
+		backlight = <&lm36273>;
+		status = "okay";
+
+		port {
+			cannong_panel_in: endpoint {
+				remote-endpoint = <&cannong_dsi_out>;
+			};
+		};
+	};
+
+	ports {
+		port {
+			cannong_dsi_out: endpoint {
+				remote-endpoint = <&cannong_panel_in>;
+			};
+		};
+};
+};
+
+/* The stock board overlay describes every panel variant; only ours is wired. */
+&{/dsi@14013000/panel1@0} {
+	status = "disabled";
+};
+
+&{/dsi@14013000/panel2@0} {
+	status = "disabled";
+};
+
+&{/dsi@14013000/panel3@0} {
+	status = "disabled";
+};
+
+/*
+ * MT6360 sub-PMIC on I2C5.  The stock overlay only has vendor-only
+ * compatibles for it; hand the PMU slave (0x34) to the mainline mt6360 MFD,
+ * which claims the PMIC/LDO/TCPC slave addresses (0x1a/0x64/0x4e) itself.
+ * VTP (LDO2) powers the touch controller; the DRAM rails must never be
+ * switched off.
+ */
+&{/i2c5@11d00000} {
+	clock-frequency = <400000>;
+};
+
+&{/i2c5@11d00000/subpmic_pmic@1a} {
+	status = "disabled";
+};
+
+&{/i2c5@11d00000/subpmic_ldo@64} {
+	status = "disabled";
+};
+
+&{/i2c5@11d00000/usb_type_c@4e} {
+	status = "disabled";
+};
+
+&{/i2c5@11d00000/subpmic@34} {
+	compatible = "mediatek,mt6360";
+	interrupts-extended = <&pio 10 8>;	/* EINT10, IRQ_TYPE_LEVEL_LOW */
+	interrupt-names = "IRQB";
+	interrupt-controller;
+	#interrupt-cells = <1>;
+
+	adc {
+		compatible = "mediatek,mt6360-adc";
+		#io-channel-cells = <1>;
+	};
+
+	charger {
+		compatible = "mediatek,mt6360-chg";
+		/* DP/DM switch for BC1.2, stock Charger_Detect_Init/Release */
+		phys = <&u2port0 PHY_TYPE_USB2>;
+		phy-names = "usb";
+
+		cannong_otg_vbus: usb-otg-vbus-regulator {
+			regulator-name = "usb-otg-vbus";
+			regulator-min-microvolt = <5000000>;
+			regulator-max-microvolt = <5000000>;
+		};
+	};
+
+	tcpc {
+		compatible = "mediatek,mt6360-tcpc";
+		interrupts-extended = <&pio 9 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-names = "PD_IRQB";
+		vbus-supply = <&cannong_otg_vbus>;
+
+		connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "dual";
+			power-role = "dual";
+			try-power-role = "sink";
+			source-pdos = <PDO_FIXED(5000, 500, PDO_FIXED_DUAL_ROLE |
+						PDO_FIXED_DATA_SWAP | PDO_FIXED_USB_COMM)>;
+			sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_DUAL_ROLE |
+					      PDO_FIXED_DATA_SWAP | PDO_FIXED_USB_COMM)>;
+			op-sink-microwatt = <2500000>;
+
+			port {
+				cannong_typec_hs: endpoint {
+					remote-endpoint = <&cannong_usb_hs>;
+				};
+			};
+		};
+	};
+
+	regulator {
+		compatible = "mediatek,mt6360-regulator";
+
+		mt6360_vmdla: buck1 {
+			regulator-name = "vmdla";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1300000>;
+			regulator-always-on;
+		};
+
+		mt6360_vdram1: buck2 {
+			regulator-name = "vdram1";
+			regulator-min-microvolt = <300000>;
+			regulator-max-microvolt = <1300000>;
+			regulator-always-on;
+		};
+
+		mt6360_vmddr: ldo6 {
+			regulator-name = "vmddr";
+			regulator-min-microvolt = <500000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-always-on;
+		};
+
+		mt6360_vdram2: ldo7 {
+			regulator-name = "vdram2";
+			regulator-min-microvolt = <500000>;
+			regulator-max-microvolt = <2100000>;
+			regulator-always-on;
+		};
+
+		mt6360_vfp: ldo1 {
+			regulator-name = "vfp";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3600000>;
+		};
+
+		mt6360_vtp: ldo2 {
+			regulator-name = "vtp";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3600000>;
+			regulator-always-on;
+		};
+
+		mt6360_vmc: ldo3 {
+			regulator-name = "vmc";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <3600000>;
+		};
+
+		mt6360_vmch: ldo5 {
+			regulator-name = "vmch";
+			regulator-min-microvolt = <2700000>;
+			regulator-max-microvolt = <3600000>;
+		};
+	};
+
+	/*
+	 * Rear flash LED on FLED1 (stock: flashlights-mt6360, single LED, the
+	 * HAL only drives colour temperature 1). Limits follow the stock
+	 * driver: torch levels up to 300 mA, strobe as set in the stock DT
+	 * (fled1_strb_cur 750 mA), HW strobe timeout 1248 ms. Used by
+	 * /dev/flashlight (mtk_cam.flash=1); otherwise only the LED class
+	 * device exists and the LED stays off.
+	 */
+	led-controller {
+		compatible = "mediatek,mt6360-led";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		mt6360_fled1: led@4 {
+			reg = <4>;
+			function = "flash";
+			color = <0>;	/* LED_COLOR_ID_WHITE */
+			function-enumerator = <1>;
+			led-max-microamp = <300000>;
+			flash-max-microamp = <750000>;
+			flash-max-timeout-us = <1248000>;
+		};
+	};
+};
+
+/* TCPM owns source VBUS, independently of the USB controller's data role. */
+&mtu3_0 {
+	dr_mode = "otg";
+	usb-role-switch;
+	role-switch-default-mode = "peripheral";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	ranges;
+
+	usb@11200000 {
+		compatible = "mediatek,mt6853-xhci", "mediatek,mtk-xhci";
+		reg = <0x11200000 0x1000>;
+		reg-names = "mac";
+		interrupts = <0 97 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&infracfg_ao_clk 0x28>, <&apmixed_clk 0x0e>;
+		clock-names = "sys_ck", "ref_ck";
+		vusb33-supply = <&mt_pmic_vusb_ldo_reg>;
+	};
+
+	port {
+		cannong_usb_hs: endpoint {
+			remote-endpoint = <&cannong_typec_hs>;
+		};
+	};
+};
+
+/*
+ * NT36672A TDDI touch on SPI4 CS0. The stock overlay only has a placeholder
+ * node there; turn it into the touch controller and tie it to the panel so
+ * firmware is (re)downloaded whenever the panel is powered up.
+ */
+&{/spi4@11018000/touch_spi@0} {
+	compatible = "novatek,nt36672a-spi";
+	status = "okay";
+	spi-max-frequency = <5000000>;
+	/*
+	 * The NT36672A ignores a transfer when CS setup is only one
+	 * controller tick (the mainline default). The vendor driver used
+	 * 2 * sck_time ticks (~180 ns) for setup, hold and idle.
+	 */
+	spi-cs-setup-delay-ns = <200>;
+	spi-cs-hold-delay-ns = <200>;
+	spi-cs-inactive-delay-ns = <200>;
+	interrupts-extended = <&pio 14 1>;	/* EINT14, IRQ_TYPE_EDGE_RISING */
+	reset-gpios = <&pio 15 1>;		/* GPIO_ACTIVE_LOW */
+	vdd-supply = <&mt6360_vtp>;
+	novatek,swrst-n8-addr = <0x3f0fe>;
+	novatek,spi-rd-fast-addr = <0x3f310>;
+	firmware-name = "novatek_nt36672a_g7_fw01.bin", "novatek_ts_fw.bin";
+	touchscreen-size-x = <1080>;
+	touchscreen-size-y = <2340>;
+	panel = <&cannong_panel>;
+};
+
+/* /dev/flashlight compat for the stock camera HAL (mtk_cam.hw=1 mtk_cam.flash=1) */
+&{/} {
+	flashlight-compat {
+		compatible = "mediatek,mt6853-flashlight-compat";
+		leds = <&mt6360_fled1>;
+	};
+};

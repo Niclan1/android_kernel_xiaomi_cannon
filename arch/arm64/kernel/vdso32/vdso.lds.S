@@ -1,37 +1,27 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * Adapted from arm64 version.
  *
  * GNU linker script for the VDSO library.
- *
- * Copyright (C) 2012 ARM Limited
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * Author: Will Deacon <will.deacon@arm.com>
  * Heavily based on the vDSO linker scripts for other archs.
+ *
+ * Copyright (C) 2012-2018 ARM Limited
  */
 
 #include <linux/const.h>
 #include <asm/page.h>
 #include <asm/vdso.h>
+#include <asm-generic/vmlinux.lds.h>
+#include <vdso/datapage.h>
 
 OUTPUT_FORMAT("elf32-littlearm", "elf32-bigarm", "elf32-littlearm")
 OUTPUT_ARCH(arm)
 
 SECTIONS
 {
-	PROVIDE_HIDDEN(_vdso_data = . - PAGE_SIZE);
-	. = VDSO_LBASE + SIZEOF_HEADERS;
+	VDSO_VVAR_SYMS
+
+	. = SIZEOF_HEADERS;
 
 	.hash		: { *(.hash) }			:text
 	.gnu.hash	: { *(.gnu.hash) }
@@ -45,12 +35,30 @@ SECTIONS
 
 	.dynamic	: { *(.dynamic) }		:text	:dynamic
 
-	.rodata		: { *(.rodata*) }		:text
+	.rodata		: {
+		*(.rodata*)
+		*(.got)
+		*(.got.plt)
+		*(.plt)
+		*(.rel.iplt)
+		*(.iplt)
+		*(.igot.plt)
+	}						:text
 
-	.text		: { *(.text*) }			:text	=0xe7f001f2
+	.text		: {
+		*(.text*)
+		*(.glue_7)
+		*(.glue_7t)
+		*(.vfp11_veneer)
+		*(.v4_bx)
+	}						:text	=0xe7f001f2
 
-	.got		: { *(.got) }
-	.rel.plt	: { *(.rel.plt) }
+	.rel.dyn	: { *(.rel*) }
+
+	.ARM.exidx : { *(.ARM.exidx*) }
+	DWARF_DEBUG
+	ELF_DETAILS
+	.ARM.attributes 0 : { *(.ARM.attributes) }
 
 	/DISCARD/	: {
 		*(.note.GNU-stack)
@@ -77,19 +85,7 @@ VERSION
 		__vdso_clock_gettime;
 		__vdso_gettimeofday;
 		__vdso_clock_getres;
-		__vdso_time;
-		__kernel_sigreturn_arm;
-		__kernel_sigreturn_thumb;
-		__kernel_rt_sigreturn_arm;
-		__kernel_rt_sigreturn_thumb;
+		__vdso_clock_gettime64;
 	local: *;
 	};
 }
-
-/*
- * Make the sigreturn code visible to the kernel.
- */
-VDSO_compat_sigreturn_arm	= __kernel_sigreturn_arm;
-VDSO_compat_sigreturn_thumb	= __kernel_sigreturn_thumb;
-VDSO_compat_rt_sigreturn_arm	= __kernel_rt_sigreturn_arm;
-VDSO_compat_rt_sigreturn_thumb	= __kernel_rt_sigreturn_thumb;

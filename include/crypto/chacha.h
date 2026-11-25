@@ -15,42 +15,41 @@
 #ifndef _CRYPTO_CHACHA_H
 #define _CRYPTO_CHACHA_H
 
-#include <crypto/skcipher.h>
+#include <linux/unaligned.h>
+#include <linux/string.h>
 #include <linux/types.h>
-#include <linux/crypto.h>
 
 /* 32-bit stream position, then 96-bit nonce (RFC7539 convention) */
 #define CHACHA_IV_SIZE		16
 
 #define CHACHA_KEY_SIZE		32
-#define CHACHA20_KEY_SIZE	32
 #define CHACHA_BLOCK_SIZE	64
-#define CHACHA20_BLOCK_SIZE	64
+#define CHACHAPOLY_IV_SIZE	12
+
+#define CHACHA_KEY_WORDS	8
+#define CHACHA_STATE_WORDS	16
+#define HCHACHA_OUT_WORDS	8
 
 /* 192-bit nonce, then 64-bit stream position */
 #define XCHACHA_IV_SIZE		32
 
-struct chacha_ctx {
-	u32 key[8];
-	int nrounds;
+struct chacha_state {
+	u32 x[CHACHA_STATE_WORDS];
 };
 
-void chacha_block(u32 *state, u8 *stream, int nrounds);
-static inline void chacha20_block(u32 *state, u8 *stream)
+void chacha_block_generic(struct chacha_state *state,
+			  u8 out[CHACHA_BLOCK_SIZE], int nrounds);
+static inline void chacha20_block(struct chacha_state *state,
+				  u8 out[CHACHA_BLOCK_SIZE])
 {
-	chacha_block(state, stream, 20);
+	chacha_block_generic(state, out, 20);
 }
-void hchacha_block(const u32 *in, u32 *out, int nrounds);
 
-void crypto_chacha_init(u32 *state, struct chacha_ctx *ctx, u8 *iv);
+void hchacha_block_generic(const struct chacha_state *state,
+			   u32 out[HCHACHA_OUT_WORDS], int nrounds);
 
-int crypto_chacha20_setkey(struct crypto_skcipher *tfm, const u8 *key,
-			   unsigned int keysize);
-int crypto_chacha12_setkey(struct crypto_skcipher *tfm, const u8 *key,
-			   unsigned int keysize);
-
-int crypto_chacha_crypt(struct skcipher_request *req);
-int crypto_xchacha_crypt(struct skcipher_request *req);
+void hchacha_block(const struct chacha_state *state,
+		   u32 out[HCHACHA_OUT_WORDS], int nrounds);
 
 enum chacha_constants { /* expand 32-byte k */
 	CHACHA_CONSTANT_EXPA = 0x61707865U,
@@ -59,12 +58,45 @@ enum chacha_constants { /* expand 32-byte k */
 	CHACHA_CONSTANT_TE_K = 0x6b206574U
 };
 
-static inline void chacha_init_consts(u32 *state)
+static inline void chacha_init_consts(struct chacha_state *state)
 {
-	state[0]  = CHACHA_CONSTANT_EXPA;
-	state[1]  = CHACHA_CONSTANT_ND_3;
-	state[2]  = CHACHA_CONSTANT_2_BY;
-	state[3]  = CHACHA_CONSTANT_TE_K;
+	state->x[0]  = CHACHA_CONSTANT_EXPA;
+	state->x[1]  = CHACHA_CONSTANT_ND_3;
+	state->x[2]  = CHACHA_CONSTANT_2_BY;
+	state->x[3]  = CHACHA_CONSTANT_TE_K;
+}
+
+static inline void chacha_init(struct chacha_state *state,
+			       const u32 key[CHACHA_KEY_WORDS],
+			       const u8 iv[CHACHA_IV_SIZE])
+{
+	chacha_init_consts(state);
+	state->x[4]  = key[0];
+	state->x[5]  = key[1];
+	state->x[6]  = key[2];
+	state->x[7]  = key[3];
+	state->x[8]  = key[4];
+	state->x[9]  = key[5];
+	state->x[10] = key[6];
+	state->x[11] = key[7];
+	state->x[12] = get_unaligned_le32(iv +  0);
+	state->x[13] = get_unaligned_le32(iv +  4);
+	state->x[14] = get_unaligned_le32(iv +  8);
+	state->x[15] = get_unaligned_le32(iv + 12);
+}
+
+void chacha_crypt(struct chacha_state *state, u8 *dst, const u8 *src,
+		  unsigned int bytes, int nrounds);
+
+static inline void chacha20_crypt(struct chacha_state *state,
+				  u8 *dst, const u8 *src, unsigned int bytes)
+{
+	chacha_crypt(state, dst, src, bytes, 20);
+}
+
+static inline void chacha_zeroize_state(struct chacha_state *state)
+{
+	memzero_explicit(state, sizeof(*state));
 }
 
 #endif /* _CRYPTO_CHACHA_H */

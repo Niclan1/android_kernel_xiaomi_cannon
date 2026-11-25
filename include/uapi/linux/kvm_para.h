@@ -13,6 +13,7 @@
 /* Return values for hypercalls */
 #define KVM_ENOSYS		1000
 #define KVM_EFAULT		EFAULT
+#define KVM_EINVAL		EINVAL
 #define KVM_E2BIG		E2BIG
 #define KVM_EPERM		EPERM
 #define KVM_EOPNOTSUPP		95
@@ -26,6 +27,19 @@
 #define KVM_HC_MIPS_EXIT_VM		7
 #define KVM_HC_MIPS_CONSOLE_OUTPUT	8
 #define KVM_HC_CLOCK_PAIRING		9
+#define KVM_HC_SEND_IPI		10
+#define KVM_HC_SCHED_YIELD		11
+#define KVM_HC_MAP_GPA_RANGE		12
+
+#define KVM_HC_PKVM_OP			20
+
+/* PKVM provided hypercalls for guest use. */
+#define PKVM_GHC_NUM(x)			(x + KVM_HC_PKVM_OP)
+#define PKVM_GHC_SHARE_MEM		PKVM_GHC_NUM(1)
+#define PKVM_GHC_UNSHARE_MEM		PKVM_GHC_NUM(2)
+#define PKVM_GHC_IOREAD			PKVM_GHC_NUM(3)
+#define PKVM_GHC_IOWRITE		PKVM_GHC_NUM(4)
+#define PKVM_GHC_START_CPU		PKVM_GHC_NUM(5)
 
 /*
  * hypercalls use architecture specific

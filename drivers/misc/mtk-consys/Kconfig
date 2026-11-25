@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config MTK_CONSYS_PORT
+	bool "MediaTek MT6853 connectivity (consys) port, stage 1"
+	depends on OF && (ARCH_MEDIATEK || COMPILE_TEST)
+	default n
+	help
+	  Stage 1 of the MT6853 connectivity subsystem port. It only creates
+	  /dev/wmtdetect so that the vendor wmt_loader can finish its
+	  detection handshake and set vendor.connsys.driver.ready. The
+	  connectivity hardware (power, clocks, firmware, Wi-Fi, Bluetooth,
+	  GPS, FM) is not touched and not functional yet.
+
+	  It does nothing unless the device tree has a
+	  "mediatek,mt6853-consys" node. Must be built in, because the
+	  loader runs before any module is loaded.
+
+	  If unsure, say N.
+
+config MTK_CONSYS_WMT
+	bool "MediaTek MT6853 consys WMT/STP core (hardware bring-up)"
+	depends on MTK_CONSYS_PORT && ARM64 && PM && REGULATOR && MFD_MT6397
+	depends on THERMAL_OF && PINCTRL && GPIOLIB_LEGACY && OF_RESERVED_MEM
+	depends on MMC=y && FW_LOADER=y && PROC_FS
+	default n
+	help
+	  Stage 2 of the MT6853 connectivity port: the vendor WMT/STP core
+	  with its consys power-up, A-die detection, firmware download and
+	  /dev/stpwmt, adapted to mainline. It powers the chip up at boot.
+	  Booting with
+
+	    mtk_consys.hw=0
+
+	  leaves the hardware untouched and keeps the stage 1 handshake in
+	  charge. mtk_consys.power=0 registers the drivers without ever
+	  powering the chip.
+
+	  The device tree needs the memory-region, pmic and regulator
+	  supplies of the consys node (arch/arm64/boot/dts/mediatek/
+	  mt6853-conn.dtsi). The firmware is loaded from the path set by
+	  firmware_class.path.
+
+	  If unsure, say N.
+
+source "drivers/misc/mtk-consys/bt/Kconfig"
+source "drivers/misc/mtk-consys/gps/Kconfig"
+source "drivers/misc/mtk-consys/wlan/Kconfig"

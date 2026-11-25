@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * MT6853 PSCI idle states. The vendor "mediatek,idle-state" nodes are not
+ * understood by the mainline PSCI cpuidle driver, so the CPUs only ever
+ * executed WFI. Core power-down (cpuoff) is enabled; cluster power-down is
+ * opt-in with -DMT6853_CPUIDLE_CLUSTER_OFF. mcusysoff/s2idle need SPM/MCUPM
+ * and stay unused. Kill switch: cpuidle.off=1 on the command line.
+ */
+
+&cpuoff_l {
+	compatible = "arm,idle-state";
+};
+
+&cpuoff_b {
+	compatible = "arm,idle-state";
+};
+
+#ifdef MT6853_CPUIDLE_CLUSTER_OFF
+&clusteroff_l {
+	compatible = "arm,idle-state";
+};
+
+&clusteroff_b {
+	compatible = "arm,idle-state";
+};
+#endif
+
+#ifdef MT6853_CPUIDLE_CLUSTER_OFF
+#define MT6853_IDLE_LL	<&cpuoff_l &clusteroff_l>
+#define MT6853_IDLE_L	<&cpuoff_b &clusteroff_b>
+#else
+#define MT6853_IDLE_LL	<&cpuoff_l>
+#define MT6853_IDLE_L	<&cpuoff_b>
+#endif
+
+&{/cpus/cpu@000} { cpu-idle-states = MT6853_IDLE_LL; };
+&{/cpus/cpu@001} { cpu-idle-states = MT6853_IDLE_LL; };
+&{/cpus/cpu@002} { cpu-idle-states = MT6853_IDLE_LL; };
+&{/cpus/cpu@003} { cpu-idle-states = MT6853_IDLE_LL; };
+&{/cpus/cpu@004} { cpu-idle-states = MT6853_IDLE_LL; };
+&{/cpus/cpu@005} { cpu-idle-states = MT6853_IDLE_LL; };
+&{/cpus/cpu@100} { cpu-idle-states = MT6853_IDLE_L; };
+&{/cpus/cpu@101} { cpu-idle-states = MT6853_IDLE_L; };
+
+/* Broadcast clockevent for the states that stop the local timer */
+&{/sys_timer@10017000} {
+	compatible = "mediatek,mt6853-timer", "mediatek,mt6765-timer";
+};
